@@ -1,0 +1,6 @@
+{
+  "name": "YegnaEkub - Digital Ethiopian Ekub Platform",
+  "description": "Secure, transparent digital Ethiopian Ekub & RoSCA rotating savings platform with provably fair draws, multi-cycle payments, and verified Ethiopian bank transfers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

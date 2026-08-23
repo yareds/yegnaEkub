@@ -1,0 +1,12 @@
+{
+  "projectId": "etphone-auction",
+  "appId": "1:169406741826:web:8562a22e4573dbcc645cdb",
+  "apiKey": "AIzaSyDC8QMwWFv3h-hqzYEuyQIveBze2wgsc7s",
+  "authDomain": "etphone-auction.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-cae817cb-80d9-4440-be53-6ac1a050ff17",
+  "storageBucket": "etphone-auction.firebasestorage.app",
+  "messagingSenderId": "169406741826",
+  "measurementId": "",
+  "oAuthClientId": "169406741826-mo7td3nq1qcgcpcqo8sjd2mefr3c64ei.apps.googleusercontent.com",
+  "recaptchaSiteKey": ""
+}
