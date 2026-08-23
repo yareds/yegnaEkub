@@ -110,10 +110,6 @@ export const LiveDrawModal: React.FC<LiveDrawModalProps> = ({
         ekubName: ekub.name,
         cycleId: `cycle-${ekub.currentCycle}`,
         cycleNumber: ekub.currentCycle,
-        eligibleMembers: members,
-        payoutAmount: ekub.payoutAmount,
-        actorId: userProfile?.uid || 'user-admin',
-        actorName: userProfile?.fullName || 'Yared Abegaz',
       });
 
       // Keep spinning for 2.5 seconds for suspense

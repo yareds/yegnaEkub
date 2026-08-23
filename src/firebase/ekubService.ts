@@ -5,6 +5,7 @@ import {
   getDoc,
   setDoc,
   updateDoc,
+  writeBatch,
   query,
   where,
   orderBy,
@@ -85,58 +86,22 @@ export const getEkubById = async (id: string): Promise<Ekub | null> => {
 };
 
 export const createEkub = async (ekubData: Omit<Ekub, 'id' | 'createdAt' | 'currentMemberCount' | 'currentCycle'>): Promise<Ekub> => {
+  // Ekub creation MUST go through the Cloud Function -- it is the only path
+  // that verifies Super Admin status server-side and atomically creates the
+  // initial admin member record. There is deliberately no direct-Firestore
+  // fallback here: if the function call fails (including a legitimate
+  // permission-denied because the caller isn't Super Admin), that failure
+  // must propagate to the caller, not be silently worked around.
   try {
     const result = await createEkubCallable(ekubData);
-    if (result.data && result.data.ekub) {
-      return result.data.ekub;
+    if (!result.data?.ekub) {
+      throw new Error('Ekub creation did not return a valid Ekub record.');
     }
-  } catch (fnErr: any) {
-    console.warn('createEkub Cloud Function not available or returned error, falling back to direct Firestore write with security rules:', fnErr);
-    
-    // Direct Firestore write fallback conforming to firestore.rules
-    const newId = `ekub-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-    const adminUid = ekubData.adminId || auth.currentUser?.uid || 'admin';
-    const adminName = ekubData.adminName || auth.currentUser?.displayName || 'Admin';
-
-    const newEkub: Ekub = {
-      ...ekubData,
-      id: newId,
-      adminId: adminUid,
-      adminName: adminName,
-      adminHistory: [
-        {
-          previousAdminId: '',
-          newAdminId: adminUid,
-          newAdminName: adminName,
-          assignedAt: new Date().toISOString(),
-          assignedBy: auth.currentUser?.uid || adminUid,
-        }
-      ],
-      currentMemberCount: 1,
-      currentCycle: 1,
-      createdAt: new Date().toISOString(),
-    };
-
-    await setDoc(doc(db, 'ekubs', newId), newEkub);
-
-    // Add initial admin member record
-    const adminMember: EkubMember = {
-      userId: adminUid,
-      displayName: adminName,
-      role: 'admin',
-      status: 'active',
-      joinedAt: new Date().toISOString(),
-      contributionStatus: 'pending',
-      eligibleForDraw: true,
-      hasReceivedPayout: false,
-      totalContributed: 0,
-      cyclePosition: 1,
-    };
-    await setDoc(doc(db, 'ekubs', newId, 'members', adminUid), adminMember);
-
-    return newEkub;
+    return result.data.ekub;
+  } catch (err: any) {
+    console.error('createEkub failed:', err);
+    throw new Error(err?.message || 'Failed to create Ekub. Only the Super Admin can create a new Ekub.');
   }
-  throw new Error('Failed to create Ekub circle.');
 };
 
 // Reassign Ekub Admin (Super Admin only)
@@ -188,6 +153,10 @@ export const getEkubMembers = async (ekubId: string): Promise<EkubMember[]> => {
 };
 
 export const joinEkub = async (ekubId: string, memberData: { userId: string; displayName: string; role?: 'admin' | 'member'; status?: 'active' | 'pending'; photoURL?: string; phoneNumber?: string }): Promise<EkubMember> => {
+  // Adding a member must go through the Cloud Function, which verifies the
+  // caller is the Ekub's admin or Super Admin server-side. A member can no
+  // longer add themselves directly by writing to the members subcollection
+  // (the security rules only allow admin/Super Admin to create member docs).
   try {
     const result = await addEkubMemberCallable({
       ekubId,
@@ -196,30 +165,14 @@ export const joinEkub = async (ekubId: string, memberData: { userId: string; dis
       phoneNumber: memberData.phoneNumber,
       photoURL: memberData.photoURL,
     });
-    if (result.data && result.data.member) {
-      return result.data.member;
+    if (!result.data?.member) {
+      throw new Error('Adding member did not return a valid member record.');
     }
-  } catch (fnErr) {
-    console.warn('addEkubMember Cloud Function fallback to direct Firestore:', fnErr);
+    return result.data.member;
+  } catch (err: any) {
+    console.error('joinEkub failed:', err);
+    throw new Error(err?.message || 'Failed to add member. Only the Ekub Admin or Super Admin can add members.');
   }
-
-  const newMember: EkubMember = {
-    userId: memberData.userId,
-    displayName: memberData.displayName,
-    role: memberData.role || 'member',
-    status: memberData.status || 'active',
-    joinedAt: new Date().toISOString(),
-    contributionStatus: 'pending',
-    eligibleForDraw: true,
-    hasReceivedPayout: false,
-    totalContributed: 0,
-    cyclePosition: 1,
-    photoURL: memberData.photoURL,
-    phoneNumber: memberData.phoneNumber,
-  };
-
-  await setDoc(doc(db, 'ekubs', ekubId, 'members', memberData.userId), newMember);
-  return newMember;
 };
 
 // ============================================================================
@@ -318,38 +271,27 @@ export const submitContribution = async (data: {
   return newContrib;
 };
 
-// Admin verify payment via Cloud Function
-export const verifyPayment = async (ekubId: string, contributionId: string, adminId: string, adminName: string, notes?: string): Promise<boolean> => {
+// Admin verify payment -- Cloud Function only. Verifying a contribution also
+// flips the member's eligibility/contributionStatus atomically, which a
+// direct client write could get out of sync (or forge outright).
+export const verifyPayment = async (ekubId: string, contributionId: string, adminId?: string, adminName?: string, notes?: string): Promise<boolean> => {
   try {
     const res = await verifyContributionCallable({ ekubId, contributionId, notes });
     return res.data.success;
-  } catch (fnErr: any) {
-    console.warn('verifyContribution Cloud Function fallback to direct Firestore transaction:', fnErr);
-    const contribRef = doc(db, 'ekubs', ekubId, 'contributions', contributionId);
-    await updateDoc(contribRef, {
-      status: 'verified',
-      verifiedAt: new Date().toISOString(),
-      verifiedBy: adminId,
-      verifiedByName: adminName,
-    });
-    return true;
+  } catch (err: any) {
+    console.error('verifyPayment failed:', err);
+    throw new Error(err?.message || 'Failed to verify payment. Only the Ekub Admin or Super Admin can verify contributions.');
   }
 };
 
-// Admin reject payment via Cloud Function
-export const rejectPayment = async (ekubId: string, contributionId: string, adminId: string, adminName: string, reason: string): Promise<boolean> => {
+// Admin reject payment -- Cloud Function only, same reasoning as above.
+export const rejectPayment = async (ekubId: string, contributionId: string, adminId?: string, adminName?: string, reason: string = 'Invalid transaction reference'): Promise<boolean> => {
   try {
     const res = await rejectContributionCallable({ ekubId, contributionId, reason });
     return res.data.success;
-  } catch (fnErr: any) {
-    console.warn('rejectContribution Cloud Function fallback to direct Firestore update:', fnErr);
-    const contribRef = doc(db, 'ekubs', ekubId, 'contributions', contributionId);
-    await updateDoc(contribRef, {
-      status: 'rejected',
-      rejectionReason: reason,
-      verifiedBy: adminId,
-    });
-    return true;
+  } catch (err: any) {
+    console.error('rejectPayment failed:', err);
+    throw new Error(err?.message || 'Failed to reject payment. Only the Ekub Admin or Super Admin can reject contributions.');
   }
 };
 
@@ -387,98 +329,38 @@ export const getDraws = async (ekubId?: string): Promise<Draw[]> => {
   }
 };
 
-// Execute Draw via Cloud Function
+// Execute Draw -- Cloud Function only, no exceptions.
+//
+// There must be no client-side fallback for this operation. Picking a draw
+// winner is the single most sensitive financial action in the app; a
+// client-side Math.random()/getRandomValues() "fallback" would let the
+// browser -- and therefore whoever controls it -- influence or predict the
+// outcome, and would let the client supply its own eligibleMembers list
+// instead of the server's authoritative one. The Cloud Function always
+// reloads eligible members from Firestore itself for this reason.
 export const executeDraw = async (params: {
   ekubId: string;
   ekubName: string;
   cycleId: string;
   cycleNumber: number;
-  eligibleMembers: EkubMember[];
-  payoutAmount: number;
-  actorId: string;
-  actorName: string;
 }): Promise<{ winner: EkubMember; draw: Draw; proof: any }> => {
   try {
     const res = await executeDrawCallable({
       ekubId: params.ekubId,
       cycleNumber: params.cycleNumber,
-      clientSeed: `yegna-ekub-${params.ekubId}-cycle-${params.cycleNumber}-${Date.now()}`,
     });
-    if (res.data && res.data.draw) {
-      return {
-        winner: res.data.winner,
-        draw: res.data.draw,
-        proof: res.data.proof,
-      };
+    if (!res.data?.draw) {
+      throw new Error('Draw execution did not return a valid draw record.');
     }
-  } catch (fnErr: any) {
-    console.warn('executeDraw Cloud Function failed or unavailable, fallback to client entropy generation:', fnErr);
-    
-    // Client-side secure fallback
-    const members = params.eligibleMembers;
-    if (members.length === 0) {
-      throw new Error('No eligible members remaining for this draw cycle.');
-    }
-
-    const randomIndex = Math.floor(Math.random() * members.length);
-    const winner = members[randomIndex];
-    const drawId = `draw-${params.ekubId}-c${params.cycleNumber}-${Date.now()}`;
-    const payoutId = `payout-${params.ekubId}-c${params.cycleNumber}-${Date.now()}`;
-    const randomHex = Array.from(window.crypto.getRandomValues(new Uint8Array(32)))
-      .map(b => b.toString(16).padStart(2, '0')).join('');
-
-    const newDraw: Draw = {
-      id: drawId,
-      ekubId: params.ekubId,
-      ekubName: params.ekubName,
-      cycleId: params.cycleId,
-      cycleNumber: params.cycleNumber,
-      drawNumber: params.cycleNumber,
-      status: 'completed',
-      scheduledAt: new Date().toISOString(),
-      executedAt: new Date().toISOString(),
-      eligibleMemberIds: members.map(m => m.userId),
-      eligibleMemberCount: members.length,
-      winnerId: winner.userId,
-      winnerName: winner.displayName,
-      payoutAmount: params.payoutAmount,
-      randomnessMethod: 'WebCrypto SHA-256 Client Entropy Engine',
-      serverSeed: randomHex,
-      verificationHash: randomHex,
-      verificationProof: {
-        winningIndex: randomIndex,
-        rawDecimal: (randomIndex * 1000).toString(),
-        hashResult: randomHex,
-      },
-      createdAt: new Date().toISOString(),
+    return {
+      winner: res.data.winner,
+      draw: res.data.draw,
+      proof: res.data.proof,
     };
-
-    const newPayout: Payout = {
-      id: payoutId,
-      ekubId: params.ekubId,
-      ekubName: params.ekubName,
-      cycleId: params.cycleId,
-      cycleNumber: params.cycleNumber,
-      drawId: drawId,
-      winnerId: winner.userId,
-      winnerName: winner.displayName,
-      amount: params.payoutAmount,
-      currency: 'ETB',
-      status: 'documents_required',
-      requiredDocuments: ['National ID / Kebele ID', 'Bank Account / Telebirr Confirmation'],
-      createdAt: new Date().toISOString(),
-    };
-
-    await setDoc(doc(db, 'ekubs', params.ekubId, 'draws', drawId), newDraw);
-    await setDoc(doc(db, 'ekubs', params.ekubId, 'payouts', payoutId), newPayout);
-    await updateDoc(doc(db, 'ekubs', params.ekubId, 'members', winner.userId), {
-      hasReceivedPayout: true,
-      eligibleForDraw: false,
-    });
-
-    return { winner, draw: newDraw, proof: newDraw.verificationProof };
+  } catch (err: any) {
+    console.error('executeDraw failed:', err);
+    throw new Error(err?.message || 'Failed to execute draw. Only the Ekub Admin or Super Admin can run a draw.');
   }
-  throw new Error('Draw execution failed.');
 };
 
 // ============================================================================
@@ -547,38 +429,27 @@ export const submitPayoutAccountDetails = async (
   return true;
 };
 
-// Approve Payout via Cloud Function
-export const approvePayout = async (ekubId: string, payoutId: string, adminId: string, adminName: string): Promise<boolean> => {
+// Approve Payout -- Cloud Function only. Firestore rules explicitly deny
+// direct client writes to a payout's `status` field (see the payouts
+// subcollection rule), so there is no working fallback to fall back to.
+export const approvePayout = async (ekubId: string, payoutId: string): Promise<boolean> => {
   try {
     const res = await approvePayoutCallable({ ekubId, payoutId });
     return res.data.success;
-  } catch (fnErr) {
-    console.warn('approvePayout Cloud Function fallback to direct Firestore:', fnErr);
-    const payoutRef = doc(db, 'ekubs', ekubId, 'payouts', payoutId);
-    await updateDoc(payoutRef, {
-      status: 'approved',
-      approvedBy: adminId,
-      approvedByName: adminName,
-      approvedAt: new Date().toISOString(),
-    });
-    return true;
+  } catch (err: any) {
+    console.error('approvePayout failed:', err);
+    throw new Error(err?.message || 'Failed to approve payout. Only the Ekub Admin or Super Admin can approve payouts.');
   }
 };
 
-// Disburse Payout via Cloud Function
-export const disbursePayout = async (ekubId: string, payoutId: string, paymentReference: string, adminId: string, adminName: string): Promise<boolean> => {
+// Disburse Payout -- Cloud Function only, same reasoning as above.
+export const disbursePayout = async (ekubId: string, payoutId: string, paymentReference: string): Promise<boolean> => {
   try {
     const res = await disbursePayoutCallable({ ekubId, payoutId, paymentReference });
     return res.data.success;
-  } catch (fnErr) {
-    console.warn('disbursePayout Cloud Function fallback to direct Firestore:', fnErr);
-    const payoutRef = doc(db, 'ekubs', ekubId, 'payouts', payoutId);
-    await updateDoc(payoutRef, {
-      status: 'paid',
-      paymentReference,
-      processedAt: new Date().toISOString(),
-    });
-    return true;
+  } catch (err: any) {
+    console.error('disbursePayout failed:', err);
+    throw new Error(err?.message || 'Failed to disburse payout. Only the Ekub Admin or Super Admin can disburse payouts.');
   }
 };
 
@@ -625,7 +496,24 @@ export const markNotificationAsRead = async (notifId: string): Promise<void> => 
 };
 
 export const markNotificationsAsRead = async (userId?: string): Promise<void> => {
-  // Direct batch update
+  if (!userId) return;
+  try {
+    // Only the user's OWN notification docs (userId == their uid) can be
+    // updated by them per the security rules -- broadcast docs (userId ==
+    // 'all') are shared across every user, so flipping `read` on one would
+    // both fail the rule (they don't own it) and incorrectly hide it for
+    // everyone else. A writeBatch is all-or-nothing, so 'all' docs must be
+    // excluded before batching or the whole batch would be rejected.
+    const snap = await getDocs(query(collection(db, 'notifications'), where('userId', '==', userId)));
+    if (snap.empty) return;
+    const batch = writeBatch(db);
+    snap.docs.forEach(d => {
+      batch.update(d.ref, { read: true });
+    });
+    await batch.commit();
+  } catch (err) {
+    console.warn('Failed to mark notifications as read:', err);
+  }
 };
 
 // ============================================================================

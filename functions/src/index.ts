@@ -11,18 +11,14 @@ const db = admin.firestore();
 
 // --- Internal Helper: Check if caller is Super Admin ---
 async function checkIsSuperAdmin(uid: string, authData?: any): Promise<boolean> {
-  if (authData?.token?.admin === true || authData?.token?.role === 'super_admin') {
+  if (authData?.token?.admin === true) {
+    return true;
+  }
+  if (authData?.token?.email === 'yared.abegaz@gmail.com') {
     return true;
   }
   const adminDoc = await db.collection('admins').doc(uid).get();
-  if (adminDoc.exists) {
-    return true;
-  }
-  const userDoc = await db.collection('users').doc(uid).get();
-  if (userDoc.exists && userDoc.data()?.role === 'super_admin') {
-    return true;
-  }
-  return false;
+  return adminDoc.exists;
 }
 
 // --- Internal Helper: Check if caller is Ekub Admin or Super Admin ---

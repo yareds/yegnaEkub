@@ -2,7 +2,16 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // --- Super Admin & Auth Helpers ---
+    // ==========================================================================
+    // AUTH HELPERS
+    //
+    // IMPORTANT: Super Admin status is NEVER derived from a field on a
+    // client-writable document (e.g. users/{uid}.role). It is derived only
+    // from a Firebase Auth custom claim, the bootstrap email on the verified
+    // ID token, or membership in /admins/{uid} -- a collection only a Super
+    // Admin can write to. This closes the self-escalation path where a user
+    // could set role: 'super_admin' on their own /users doc.
+    // ==========================================================================
     function isAuthenticated() {
       return request.auth != null;
     }
@@ -11,105 +20,232 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    // Role-Based Access: Super Admin is verified against server-controlled /admins collection, auth claims, or bootstrapped developer email
     function isSuperAdmin() {
       return isAuthenticated() && (
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
         request.auth.token.admin == true ||
-        request.auth.token.email == 'yared.abegaz@gmail.com'
+        request.auth.token.email == 'yared.abegaz@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
     }
 
-    // Ekub-scoped Admin verification
+    // Ekub-scoped admin: the caller is the assigned adminId on this specific
+    // Ekub, OR is the Super Admin. Reads the Ekub doc itself -- never trusts
+    // anything the client claims about its own role.
     function isEkubAdmin(ekubId) {
-      return isAuthenticated() && (
-        isSuperAdmin() ||
-        (exists(/databases/$(database)/documents/ekubs/$(ekubId)) &&
-         get(/databases/$(database)/documents/ekubs/$(ekubId)).data.adminId == request.auth.uid)
+      return isSuperAdmin() || (
+        isAuthenticated() &&
+        exists(/databases/$(database)/documents/ekubs/$(ekubId)) &&
+        get(/databases/$(database)/documents/ekubs/$(ekubId)).data.adminId == request.auth.uid
       );
     }
 
-    // --- Global Admins Collection ---
+    function isEkubMember(ekubId) {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/ekubs/$(ekubId)/members/$(request.auth.uid));
+    }
+
+    // ==========================================================================
+    // ADMINS COLLECTION -- maps uid -> super-admin grant.
+    // Only a Super Admin can grant/revoke this.
+    // ==========================================================================
     match /admins/{adminId} {
-      allow read: if true;
+      allow read: if isSuperAdmin();
       allow write: if isSuperAdmin();
     }
 
-    // --- Users Collection ---
+    // ==========================================================================
+    // USERS COLLECTION
+    // ==========================================================================
     match /users/{userId} {
-      allow read: if true;
-      allow create, update: if isAuthenticated();
+      // Any signed-in user can look up basic profile info (needed to render
+      // names/photos across Ekubs) -- but the `role` field itself is never
+      // trusted for authorization decisions anywhere else in these rules,
+      // so this stays informational/display-only.
+      allow read: if isAuthenticated();
+
+      // A user may only create their OWN profile, and it must start as
+      // 'member' -- UNLESS they already qualify as Super Admin by custom
+      // claim / bootstrap email (checked independently of this document),
+      // in which case their own first-login profile may say so.
+      allow create: if isOwner(userId) &&
+        (request.resource.data.role == 'member' || isSuperAdmin());
+
+      // A user may update only their own non-privileged fields. The `role`
+      // field can never be changed via this path -- only a Super Admin can
+      // change roles, and only through the admins collection / custom claims,
+      // not by writing this field directly.
+      allow update: if (
+        isOwner(userId) &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['fullName', 'phoneNumber', 'photoURL', 'preferredLanguage',
+                    'preferredPaymentMethod', 'updatedAt']) &&
+        request.resource.data.role == resource.data.role
+      ) || isSuperAdmin();
+
       allow delete: if isSuperAdmin();
     }
 
-    // --- Ekubs Collection ---
+    // ==========================================================================
+    // EKUBS COLLECTION
+    // ==========================================================================
     match /ekubs/{ekubId} {
-      // All users (including guests exploring discover/landing) can browse Ekubs
-      allow read: if true;
-      allow create: if isAuthenticated();
-      allow update: if isEkubAdmin(ekubId) || isSuperAdmin();
+      // Public browsing of non-private Ekubs (for "discover"); private Ekubs
+      // are visible only to their admin, members, and Super Admin.
+      allow read: if resource.data.isPrivate != true ||
+        isSuperAdmin() || isEkubAdmin(ekubId) || isEkubMember(ekubId);
+
+      // Only Super Admin can create a new Ekub. This is enforced here as a
+      // last line of defense; the actual creation path goes through the
+      // createEkub Cloud Function, which also assigns the initial admin
+      // member doc atomically.
+      allow create: if isSuperAdmin();
+
+      // The assigned Ekub Admin can update operational fields only.
+      // Only Super Admin can change adminId (reassignment), isPrivate, or
+      // core financial parameters.
+      allow update: if isSuperAdmin() || (
+        isEkubAdmin(ekubId) &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status', 'nextContributionDate', 'nextDrawDate', 'rules',
+                    'description', 'currentCycle', 'lastDrawDate', 'updatedAt'])
+      );
+
       allow delete: if isSuperAdmin();
 
       // --- Members Subcollection ---
       match /members/{memberId} {
-        allow read: if true;
-        allow create, update: if isAuthenticated();
-        allow delete: if isEkubAdmin(ekubId) || isSuperAdmin();
+        allow read: if isSuperAdmin() || isEkubAdmin(ekubId) ||
+          (isEkubMember(ekubId) && isOwner(memberId));
+
+        // Members can't add themselves directly -- joining happens via the
+        // addEkubMember Cloud Function (which can validate invite codes).
+        allow create: if isSuperAdmin() || isEkubAdmin(ekubId);
+
+        // The Ekub Admin/Super Admin can update anything on a member doc.
+        // The member themself may only touch their own display fields --
+        // never role, status, eligibility, or contribution/payout state.
+        allow update: if isSuperAdmin() || isEkubAdmin(ekubId) || (
+          isOwner(memberId) &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['displayName', 'photoURL', 'phoneNumber'])
+        );
+
+        allow delete: if isSuperAdmin() || isEkubAdmin(ekubId);
       }
 
       // --- Cycles Subcollection ---
       match /cycles/{cycleId} {
-        allow read: if true;
-        allow write: if isEkubAdmin(ekubId) || isSuperAdmin();
+        allow read: if isSuperAdmin() || isEkubAdmin(ekubId) || isEkubMember(ekubId);
+        allow write: if isSuperAdmin() || isEkubAdmin(ekubId);
       }
 
       // --- Contributions Subcollection ---
       match /contributions/{contributionId} {
-        allow read: if true;
-        allow create: if isAuthenticated();
-        allow update: if isEkubAdmin(ekubId) || isSuperAdmin();
+        allow read: if isSuperAdmin() || isEkubAdmin(ekubId) ||
+          (isEkubMember(ekubId) && resource.data.userId == request.auth.uid);
+
+        // A member can submit a contribution only for themselves, and it
+        // must start as 'pending' -- never pre-verified.
+        allow create: if isEkubMember(ekubId) &&
+          request.resource.data.userId == request.auth.uid &&
+          request.resource.data.status == 'pending';
+
+        // Verifying/rejecting a contribution is admin-only -- members cannot
+        // edit their own submission after the fact.
+        allow update: if isSuperAdmin() || isEkubAdmin(ekubId);
         allow delete: if isSuperAdmin();
       }
 
       // --- Draws Subcollection ---
       match /draws/{drawId} {
-        allow read: if true;
-        allow create, update: if isEkubAdmin(ekubId) || isSuperAdmin();
+        allow read: if isSuperAdmin() || isEkubAdmin(ekubId) || isEkubMember(ekubId);
+        // Draws are executed only via the executeDraw Cloud Function (needs
+        // the Admin SDK to write draw + payout + member atomically). Direct
+        // client writes are never permitted.
+        allow create, update: if false;
         allow delete: if isSuperAdmin();
       }
 
       // --- Payouts Subcollection ---
       match /payouts/{payoutId} {
-        allow read: if true;
-        allow create: if isEkubAdmin(ekubId) || isSuperAdmin();
-        allow update: if isEkubAdmin(ekubId) || isSuperAdmin() || (isAuthenticated() && resource.data.winnerId == request.auth.uid);
+        allow read: if isSuperAdmin() || isEkubAdmin(ekubId) ||
+          (isEkubMember(ekubId) && resource.data.winnerId == request.auth.uid);
+
+        // Payouts are created only by the executeDraw Cloud Function.
+        allow create: if false;
+
+        // Admin can update anything. The winner may submit their own payout
+        // documents/account details, and may move status forward from
+        // 'documents_required' to 'under_review' ONLY (never to 'approved'
+        // or 'paid' -- those transitions are admin/Cloud-Function-only).
+        allow update: if isSuperAdmin() || isEkubAdmin(ekubId) || (
+          isAuthenticated() && resource.data.winnerId == request.auth.uid &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['submittedDocuments', 'payoutAccountDetails', 'updatedAt', 'status']) &&
+          (
+            request.resource.data.status == resource.data.status ||
+            (resource.data.status == 'documents_required' && request.resource.data.status == 'under_review')
+          )
+        );
+
         allow delete: if isSuperAdmin();
       }
     }
 
-    // --- Notifications Collection ---
+    // ==========================================================================
+    // NOTIFICATIONS COLLECTION
+    // ==========================================================================
     match /notifications/{notificationId} {
-      allow read: if isAuthenticated();
-      allow create, update, delete: if isAuthenticated();
+      allow read: if isAuthenticated() &&
+        (resource.data.userId == request.auth.uid || resource.data.userId == 'all');
+
+      // A user (or a Cloud Function acting as an admin) can create a
+      // notification, but only addressed to themself or broadcast -- never
+      // spoofing a notification as coming from/to someone else.
+      allow create: if isSuperAdmin() || (
+        isAuthenticated() &&
+        (request.resource.data.userId == request.auth.uid || request.resource.data.userId == 'all')
+      );
+
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
     }
 
-    // --- Audit Logs Collection ---
+    // ==========================================================================
+    // AUDIT LOGS -- append-only, and only Cloud Functions (Admin SDK) may
+    // write, since Admin SDK writes bypass these rules entirely. Clients can
+    // never create, update, or delete an audit log entry.
+    // ==========================================================================
     match /auditLogs/{logId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update, delete: if false;
+      allow read: if isSuperAdmin() ||
+        (isAuthenticated() && resource.data.ekubId != null && isEkubAdmin(resource.data.ekubId));
+      allow create, update, delete: if false;
     }
 
-    // --- Support Tickets Collection ---
+    // ==========================================================================
+    // SUPPORT TICKETS
+    // ==========================================================================
     match /supportTickets/{ticketId} {
-      allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated();
+      allow read: if isSuperAdmin() ||
+        (isAuthenticated() && resource.data.userId == request.auth.uid) ||
+        (isAuthenticated() && resource.data.ekubId != null && isEkubAdmin(resource.data.ekubId));
+
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+
+      allow update: if isSuperAdmin() ||
+        (isAuthenticated() && resource.data.userId == request.auth.uid) ||
+        (isAuthenticated() && resource.data.ekubId != null && isEkubAdmin(resource.data.ekubId));
+
       allow delete: if isSuperAdmin();
     }
 
-    // --- System Settings Collection ---
+    // ==========================================================================
+    // SYSTEM SETTINGS
+    // ==========================================================================
     match /settings/{settingId} {
-      allow read: if true;
+      allow read: if isAuthenticated();
       allow write: if isSuperAdmin();
     }
   }

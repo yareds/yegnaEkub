@@ -180,7 +180,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleApprovePayout = async (p: Payout) => {
     try {
-      await approvePayout(p.ekubId, p.id, userProfile?.uid || 'admin', userProfile?.fullName || 'Finance Director');
+      await approvePayout(p.ekubId, p.id);
       setActionSuccess(`Payout of ${p.amount.toLocaleString()} ETB for ${p.winnerName} approved for disbursement.`);
       onRefreshData();
       setTimeout(() => setActionSuccess(''), 3500);
@@ -193,7 +193,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handleDisbursePayout = async (p: Payout) => {
     if (!payoutBankRef.trim()) return;
     try {
-      await disbursePayout(p.ekubId, p.id, payoutBankRef, userProfile?.uid || 'admin', userProfile?.fullName || 'Finance Director');
+      await disbursePayout(p.ekubId, p.id, payoutBankRef);
       setDisbursingPayoutId(null);
       setPayoutBankRef('');
       setActionSuccess(`Payout marked as Disbursed via bank wire ref: ${payoutBankRef}`);
