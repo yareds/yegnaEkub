@@ -19,18 +19,23 @@ import {
   ExternalLink,
   MessageSquare,
   Lock,
-  Plus
+  Plus,
+  UserCheck,
+  UserPlus,
+  ChevronRight,
+  Building2
 } from 'lucide-react';
 import { useAuth } from '../firebase/AuthContext';
 import { useTranslation } from '../locales/TranslationContext';
-import { Ekub, Contribution, Draw, Payout, AuditLog, SupportTicket } from '../types';
+import { Ekub, EkubMember, Contribution, Draw, Payout, AuditLog, SupportTicket } from '../types';
 import { 
   verifyPayment, 
   rejectPayment, 
   approvePayout, 
   disbursePayout, 
   getAuditLogs, 
-  resetDemoData 
+  assignEkubAdmin,
+  getEkubMembers
 } from '../firebase/ekubService';
 
 interface AdminDashboardProps {
@@ -56,10 +61,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onOpenVerifyDraw,
   onOpenCreateEkub,
 }) => {
-  const { userProfile } = useAuth();
+  const { userProfile, isSuperAdmin } = useAuth();
   const { t, language } = useTranslation();
 
-  const [activeTab, setActiveTab] = useState<'receipts' | 'draws' | 'payouts' | 'disputes' | 'audit'>('receipts');
+  // Selected Scope Filter (for Super Admin: 'all' or specific ekubId; for Ekub Admin: fixed to their own Ekubs)
+  const [selectedEkubFilter, setSelectedEkubFilter] = useState<string>('all');
+
+  // Available Ekubs scoped by role
+  const userAdminEkubs = ekubs.filter(e => e.adminId === userProfile?.uid);
+  const accessibleEkubs = isSuperAdmin ? ekubs : userAdminEkubs;
+
+  // Filtered dataset based on role & active scope
+  const activeEkubList = isSuperAdmin 
+    ? (selectedEkubFilter === 'all' ? ekubs : ekubs.filter(e => e.id === selectedEkubFilter))
+    : (selectedEkubFilter === 'all' ? userAdminEkubs : userAdminEkubs.filter(e => e.id === selectedEkubFilter));
+
+  const activeEkubIds = new Set(activeEkubList.map(e => e.id));
+
+  const scopedContributions = (contributions || []).filter(c => activeEkubIds.has(c.ekubId));
+  const scopedDraws = (draws || []).filter(d => activeEkubIds.has(d.ekubId));
+  const scopedPayouts = (payouts || []).filter(p => activeEkubIds.has(p.ekubId));
+
+  // Tabs
+  const [activeTab, setActiveTab] = useState<'receipts' | 'draws' | 'payouts' | 'manage_admins' | 'disputes' | 'audit'>('receipts');
+  
+  // Modals & Action States
   const [inspectReceipt, setInspectReceipt] = useState<Contribution | null>(null);
   const [rejectingContribId, setRejectingContribId] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState('Transaction reference not found on bank statement.');
@@ -68,14 +94,42 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [loadingAudit, setLoadingAudit] = useState(false);
   const [actionSuccess, setActionSuccess] = useState('');
+  const [actionError, setActionError] = useState('');
 
-  const pendingContributions = (contributions || []).filter(c => c.status === 'pending');
-  const pendingPayouts = (payouts || []).filter(p => p.status === 'under_review' || p.status === 'approved' || p.status === 'documents_required');
+  // Manage Ekub Admins state (Super Admin exclusive)
+  const [targetEkubIdForAdmin, setTargetEkubIdForAdmin] = useState<string>(ekubs[0]?.id || '');
+  const [ekubMembersList, setEkubMembersList] = useState<EkubMember[]>([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+  const [selectedMemberForAdmin, setSelectedMemberForAdmin] = useState<string>('');
+  const [customNewAdminUid, setCustomNewAdminUid] = useState('');
+  const [customNewAdminName, setCustomNewAdminName] = useState('');
+  const [isAssigningAdmin, setIsAssigningAdmin] = useState(false);
+
+  const pendingContributions = scopedContributions.filter(c => c.status === 'pending');
+  const pendingPayouts = scopedPayouts.filter(p => p.status === 'under_review' || p.status === 'approved' || p.status === 'documents_required');
   const openTickets = (supportTickets || []).filter(t => t.status === 'open' || t.status === 'in_progress');
 
-  const totalVolume = (contributions || [])
+  const totalVolume = scopedContributions
     .filter(c => c.status === 'verified')
     .reduce((sum, c) => sum + (c.amount || 0), 0);
+
+  useEffect(() => {
+    if (ekubs.length > 0 && !targetEkubIdForAdmin) {
+      setTargetEkubIdForAdmin(ekubs[0].id);
+    }
+  }, [ekubs]);
+
+  useEffect(() => {
+    if (targetEkubIdForAdmin) {
+      setLoadingMembers(true);
+      getEkubMembers(targetEkubIdForAdmin)
+        .then((m) => {
+          setEkubMembersList(m || []);
+          setLoadingMembers(false);
+        })
+        .catch(() => setLoadingMembers(false));
+    }
+  }, [targetEkubIdForAdmin]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -100,87 +154,171 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   }, [activeTab]);
 
   const handleVerify = async (c: Contribution) => {
-    await verifyPayment(c.id, userProfile?.uid || 'admin', userProfile?.fullName || 'Super Admin');
-    setActionSuccess(`Payment of ${c.amount.toLocaleString()} ETB for ${c.userName} successfully verified!`);
-    onRefreshData();
-    setTimeout(() => setActionSuccess(''), 3000);
+    try {
+      await verifyPayment(c.ekubId, c.id, userProfile?.uid || 'admin', userProfile?.fullName || 'Super Admin');
+      setActionSuccess(`Payment of ${c.amount.toLocaleString()} ETB for ${c.userName} successfully verified!`);
+      onRefreshData();
+      setTimeout(() => setActionSuccess(''), 3500);
+    } catch (err: any) {
+      setActionError(err.message || 'Verification failed.');
+      setTimeout(() => setActionError(''), 4000);
+    }
   };
 
   const handleReject = async (c: Contribution) => {
-    await rejectPayment(c.id, userProfile?.uid || 'admin', userProfile?.fullName || 'Super Admin', rejectionReason);
-    setRejectingContribId(null);
-    setActionSuccess(`Payment rejected and member notified.`);
-    onRefreshData();
-    setTimeout(() => setActionSuccess(''), 3000);
+    try {
+      await rejectPayment(c.ekubId, c.id, userProfile?.uid || 'admin', userProfile?.fullName || 'Super Admin', rejectionReason);
+      setRejectingContribId(null);
+      setActionSuccess(`Payment submission rejected and member notified.`);
+      onRefreshData();
+      setTimeout(() => setActionSuccess(''), 3500);
+    } catch (err: any) {
+      setActionError(err.message || 'Rejection failed.');
+      setTimeout(() => setActionError(''), 4000);
+    }
   };
 
   const handleApprovePayout = async (p: Payout) => {
-    await approvePayout(p.id, userProfile?.uid || 'admin', userProfile?.fullName || 'Finance Director');
-    setActionSuccess(`Payout of ${p.amount.toLocaleString()} ETB for ${p.winnerName} approved for disbursement.`);
-    onRefreshData();
-    setTimeout(() => setActionSuccess(''), 3000);
+    try {
+      await approvePayout(p.ekubId, p.id, userProfile?.uid || 'admin', userProfile?.fullName || 'Finance Director');
+      setActionSuccess(`Payout of ${p.amount.toLocaleString()} ETB for ${p.winnerName} approved for disbursement.`);
+      onRefreshData();
+      setTimeout(() => setActionSuccess(''), 3500);
+    } catch (err: any) {
+      setActionError(err.message || 'Approval failed.');
+      setTimeout(() => setActionError(''), 4000);
+    }
   };
 
   const handleDisbursePayout = async (p: Payout) => {
     if (!payoutBankRef.trim()) return;
-    await disbursePayout(p.id, payoutBankRef, userProfile?.uid || 'admin', userProfile?.fullName || 'Finance Director');
-    setDisbursingPayoutId(null);
-    setPayoutBankRef('');
-    setActionSuccess(`Payout marked as Paid via bank wire ref ${payoutBankRef}.`);
-    onRefreshData();
-    setTimeout(() => setActionSuccess(''), 3000);
-  };
-
-  const handleResetData = () => {
-    if (window.confirm('Reset all demo Ekubs, member ledgers, draws, and payouts to initial state?')) {
-      resetDemoData();
+    try {
+      await disbursePayout(p.ekubId, p.id, payoutBankRef, userProfile?.uid || 'admin', userProfile?.fullName || 'Finance Director');
+      setDisbursingPayoutId(null);
+      setPayoutBankRef('');
+      setActionSuccess(`Payout marked as Disbursed via bank wire ref: ${payoutBankRef}`);
       onRefreshData();
-      setActionSuccess('Demo dataset successfully reset to initial clean state.');
-      setTimeout(() => setActionSuccess(''), 3000);
+      setTimeout(() => setActionSuccess(''), 3500);
+    } catch (err: any) {
+      setActionError(err.message || 'Disbursement failed.');
+      setTimeout(() => setActionError(''), 4000);
     }
   };
+
+  const handleAssignAdminSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!targetEkubIdForAdmin) return;
+
+    let newUid = customNewAdminUid.trim();
+    let newName = customNewAdminName.trim();
+
+    if (selectedMemberForAdmin) {
+      const member = ekubMembersList.find(m => m.userId === selectedMemberForAdmin);
+      if (member) {
+        newUid = member.userId;
+        newName = member.displayName;
+      }
+    }
+
+    if (!newUid) {
+      setActionError('Please select or specify a valid User ID to assign as Admin.');
+      setTimeout(() => setActionError(''), 4000);
+      return;
+    }
+
+    setIsAssigningAdmin(true);
+    setActionError('');
+    try {
+      await assignEkubAdmin(targetEkubIdForAdmin, newUid, newName || 'Ekub Admin');
+      setActionSuccess(`Successfully reassigned Admin for Ekub to ${newName || newUid}!`);
+      setSelectedMemberForAdmin('');
+      setCustomNewAdminUid('');
+      setCustomNewAdminName('');
+      onRefreshData();
+      setTimeout(() => setActionSuccess(''), 4000);
+    } catch (err: any) {
+      setActionError(err.message || 'Failed to reassign Ekub Admin.');
+      setTimeout(() => setActionError(''), 4000);
+    } finally {
+      setIsAssigningAdmin(false);
+    }
+  };
+
+  const targetEkubObj = ekubs.find(e => e.id === targetEkubIdForAdmin);
 
   return (
     <div className="space-y-8 pb-16">
       
-      {/* Admin Title Header */}
+      {/* Admin Title Header with Role Badging and Circle Scope Selector */}
       <div className="bg-[#1C1132] text-white rounded-2xl p-6 sm:p-8 shadow-xl border border-[#7856FF]/20 flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
-          <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-[#7856FF]/20 border border-[#7856FF]/40 text-[#C4B5FD] text-xs font-semibold uppercase tracking-wider mb-2">
-            <ShieldCheck className="w-3.5 h-3.5 text-[#7856FF]" />
-            <span>Financial Governance & Compliance Desk</span>
+          <div className="flex flex-wrap items-center gap-2 mb-2">
+            {isSuperAdmin ? (
+              <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-purple-500/20 border border-purple-400/40 text-purple-200 text-xs font-bold uppercase tracking-wider">
+                <ShieldCheck className="w-3.5 h-3.5 text-purple-400" />
+                <span>Super Admin • Global Platform Governance</span>
+              </span>
+            ) : (
+              <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 text-xs font-bold uppercase tracking-wider">
+                <Building2 className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Ekub Admin • Scoped Circle Management</span>
+              </span>
+            )}
+
+            {/* Scope indicator */}
+            <span className="text-xs text-purple-300 font-mono bg-white/10 px-2.5 py-0.5 rounded-full">
+              {isSuperAdmin 
+                ? (selectedEkubFilter === 'all' ? 'All Circles' : `Scoped: ${activeEkubList[0]?.name || selectedEkubFilter}`)
+                : `${activeEkubList.length} Assigned Circle(s)`}
+            </span>
           </div>
+
           <h1 className="text-2xl sm:text-3xl font-bold">
             {t.adminDashboard}
           </h1>
           <p className="text-xs text-white/80 mt-1 max-w-xl">
-            Audit member bank slips, authorize cryptographic live draws, disburse verified payouts, and inspect immutable ledgers.
+            {isSuperAdmin 
+              ? 'Full platform oversight: audit slips, govern Ekub admins, verify bank settlements, and inspect immutable audit ledgers.'
+              : 'Circle management desk: verify member deposits, launch cryptographic live draws, and authorize winner payouts for your circle.'}
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-2.5">
-          <button
-            onClick={onOpenCreateEkub}
-            className="px-4 py-2.5 rounded-xl bg-[#7856FF] hover:bg-[#6340FF] text-white font-bold text-xs shadow-md transition-all flex items-center space-x-1.5"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Create New Ekub</span>
-          </button>
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Scope Dropdown Picker */}
+          {isSuperAdmin && (
+            <div className="flex items-center space-x-2 bg-white/10 p-1.5 rounded-xl border border-white/20">
+              <Filter className="w-3.5 h-3.5 text-purple-300 ml-2" />
+              <select
+                value={selectedEkubFilter}
+                onChange={(e) => setSelectedEkubFilter(e.target.value)}
+                className="bg-transparent text-white text-xs font-medium outline-none pr-3 py-1 cursor-pointer"
+              >
+                <option value="all" className="bg-[#1C1132] text-white">All Ekub Circles (Global)</option>
+                {ekubs.map(e => (
+                  <option key={e.id} value={e.id} className="bg-[#1C1132] text-white">{e.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
-          <button
-            onClick={handleResetData}
-            className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-medium text-xs border border-white/20 transition-colors flex items-center space-x-1"
-          >
-            <RotateCw className="w-3.5 h-3.5" />
-            <span>Reset Demo Data</span>
-          </button>
+          {/* Only Super Admin can create brand new Ekub circles */}
+          {isSuperAdmin && (
+            <button
+              onClick={onOpenCreateEkub}
+              className="px-4 py-2.5 rounded-xl bg-[#7856FF] hover:bg-[#6340FF] text-white font-bold text-xs shadow-md transition-all flex items-center space-x-1.5"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Create New Ekub</span>
+            </button>
+          )}
         </div>
       </div>
 
+      {/* Alerts / Feedback */}
       {actionSuccess && (
         <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-medium flex items-center justify-between shadow-sm animate-in fade-in duration-150">
           <div className="flex items-center space-x-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
             <span>{actionSuccess}</span>
           </div>
           <button onClick={() => setActionSuccess('')} className="text-emerald-700 hover:text-emerald-900">
@@ -189,12 +327,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       )}
 
-      {/* Top 5 Metrics Strip */}
+      {actionError && (
+        <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs font-medium flex items-center justify-between shadow-sm animate-in fade-in duration-150">
+          <div className="flex items-center space-x-2">
+            <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+            <span>{actionError}</span>
+          </div>
+          <button onClick={() => setActionError('')} className="text-red-700 hover:text-red-900">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Top Scoped Metrics Strip */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <div className="bg-white p-4 rounded-xl border border-[#E6E1F5] shadow-sm">
           <p className="text-[11px] font-semibold text-gray-500 uppercase">{t.activeEkubs}</p>
-          <p className="text-xl font-bold text-gray-900 mt-1">{ekubs.length}</p>
-          <p className="text-[10px] text-emerald-600 mt-0.5">3 Active Circles</p>
+          <p className="text-xl font-bold text-gray-900 mt-1">{activeEkubList.length}</p>
+          <p className="text-[10px] text-emerald-600 mt-0.5">Scoped Circles</p>
         </div>
 
         <div className="bg-white p-4 rounded-xl border border-[#E6E1F5] shadow-sm">
@@ -212,15 +362,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         <div className="bg-white p-4 rounded-xl border border-[#E6E1F5] shadow-sm">
           <p className="text-[11px] font-semibold text-gray-500 uppercase">{t.totalVolume}</p>
           <p className="text-xl font-bold text-gray-900 mt-1">
-            {totalVolume > 0 ? `${totalVolume.toLocaleString()} ETB` : '380,000 ETB'}
+            {totalVolume.toLocaleString()} ETB
           </p>
-          <p className="text-[10px] text-emerald-600 mt-0.5">Zero Default Rate</p>
+          <p className="text-[10px] text-emerald-600 mt-0.5">Verified Volume</p>
         </div>
 
         <div className="bg-white p-4 rounded-xl border border-[#E6E1F5] shadow-sm">
           <p className="text-[11px] font-semibold text-gray-500 uppercase">Support Disputes</p>
           <p className="text-xl font-bold text-gray-900 mt-1">{openTickets.length}</p>
-          <p className="text-[10px] text-gray-500 mt-0.5">All SLAs Met</p>
+          <p className="text-[10px] text-gray-500 mt-0.5">Active Tickets</p>
         </div>
       </div>
 
@@ -261,6 +411,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <Banknote className="w-4 h-4" />
           <span>Payout Clearances ({pendingPayouts.length})</span>
         </button>
+
+        {/* Super Admin Exclusive: Manage Ekub Admins */}
+        {isSuperAdmin && (
+          <button
+            onClick={() => setActiveTab('manage_admins')}
+            className={`pb-3 px-4 text-xs font-bold whitespace-nowrap border-b-2 flex items-center space-x-1.5 transition-all ${
+              activeTab === 'manage_admins'
+                ? 'border-[#7856FF] text-[#7856FF]'
+                : 'border-transparent text-gray-500 hover:text-gray-800'
+            }`}
+          >
+            <UserCheck className="w-4 h-4" />
+            <span>Manage Ekub Admins</span>
+          </button>
+        )}
 
         <button
           onClick={() => setActiveTab('disputes')}
@@ -305,7 +470,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <div className="text-center py-12 text-gray-500 text-xs">
               <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-2" />
               <p className="font-semibold text-gray-800">All submissions verified!</p>
-              <p className="text-gray-400 mt-0.5">No pending payment slips in queue.</p>
+              <p className="text-gray-400 mt-0.5">No pending payment slips in queue for active scope.</p>
             </div>
           ) : (
             <div className="space-y-4">
@@ -379,7 +544,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {ekubs.map((e) => (
+            {activeEkubList.map((e) => (
               <div key={e.id} className="p-5 rounded-2xl border border-[#E6E1F5] bg-[#F8F7FC] flex flex-col justify-between">
                 <div>
                   <div className="flex items-center justify-between">
@@ -432,7 +597,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
 
           <div className="space-y-4">
-            {payouts.map((p) => (
+            {scopedPayouts.map((p) => (
               <div key={p.id} className="p-4 rounded-xl bg-[#F8F7FC] border border-[#E6E1F5] flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                 <div className="space-y-1">
                   <div className="flex items-center space-x-2">
@@ -491,6 +656,164 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       )}
 
+      {/* TAB: MANAGE EKUB ADMINS (Super Admin exclusive) */}
+      {isSuperAdmin && activeTab === 'manage_admins' && (
+        <div className="bg-white rounded-2xl border border-[#E6E1F5] p-6 shadow-sm space-y-6">
+          <div className="border-b border-gray-100 pb-4">
+            <h2 className="text-base font-bold text-gray-900 flex items-center space-x-2">
+              <UserCheck className="w-5 h-5 text-[#7856FF]" />
+              <span>Ekub Admin Delegation & Governance</span>
+            </h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Super Admin privilege: assign or transfer operational administration of a specific Ekub circle to any authenticated user or circle member.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Left: Reassignment Form */}
+            <div className="lg:col-span-6 space-y-4">
+              <form onSubmit={handleAssignAdminSubmit} className="space-y-4 bg-[#F8F7FC] p-5 rounded-xl border border-[#E6E1F5]">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-gray-700">Assign Ekub Admin</h3>
+                
+                {/* 1. Pick Ekub */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">Target Ekub Circle</label>
+                  <select
+                    value={targetEkubIdForAdmin}
+                    onChange={(e) => {
+                      setTargetEkubIdForAdmin(e.target.value);
+                      setSelectedMemberForAdmin('');
+                    }}
+                    className="w-full p-2.5 bg-white border border-gray-300 rounded-xl text-xs outline-none focus:ring-2 focus:ring-[#7856FF]"
+                  >
+                    {ekubs.map(e => (
+                      <option key={e.id} value={e.id}>
+                        {e.name} (Current Admin: {e.adminName || e.adminId})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 2. Choose Member or Enter UID */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    Select Member from Circle (Optional)
+                  </label>
+                  {loadingMembers ? (
+                    <p className="text-xs text-gray-400 py-1">Loading members...</p>
+                  ) : (
+                    <select
+                      value={selectedMemberForAdmin}
+                      onChange={(e) => {
+                        setSelectedMemberForAdmin(e.target.value);
+                        if (e.target.value) {
+                          const m = ekubMembersList.find(mem => mem.userId === e.target.value);
+                          if (m) {
+                            setCustomNewAdminUid(m.userId);
+                            setCustomNewAdminName(m.displayName);
+                          }
+                        }
+                      }}
+                      className="w-full p-2.5 bg-white border border-gray-300 rounded-xl text-xs outline-none focus:ring-2 focus:ring-[#7856FF]"
+                    >
+                      <option value="">-- Choose from existing circle members --</option>
+                      {ekubMembersList.map(m => (
+                        <option key={m.userId} value={m.userId}>
+                          {m.displayName} (UID: {m.userId.substring(0, 8)}... | Role: {m.role})
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                {/* 3. New Admin UID */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    New Admin Firebase UID <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={customNewAdminUid}
+                    onChange={(e) => setCustomNewAdminUid(e.target.value)}
+                    placeholder="e.g. 7mK90pLmN82hQ..."
+                    className="w-full p-2.5 bg-white border border-gray-300 rounded-xl text-xs font-mono outline-none focus:ring-2 focus:ring-[#7856FF]"
+                  />
+                </div>
+
+                {/* 4. New Admin Display Name */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    Admin Full Name / Title
+                  </label>
+                  <input
+                    type="text"
+                    value={customNewAdminName}
+                    onChange={(e) => setCustomNewAdminName(e.target.value)}
+                    placeholder="e.g. Almaz Kebede (Finance Lead)"
+                    className="w-full p-2.5 bg-white border border-gray-300 rounded-xl text-xs outline-none focus:ring-2 focus:ring-[#7856FF]"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isAssigningAdmin || !customNewAdminUid.trim()}
+                  className="w-full py-2.5 px-4 rounded-xl bg-[#7856FF] hover:bg-[#6340FF] disabled:opacity-50 text-white text-xs font-bold flex items-center justify-center space-x-2 shadow-sm transition-colors cursor-pointer"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>{isAssigningAdmin ? 'Reassigning via Cloud Function...' : 'Authorize & Assign Ekub Admin'}</span>
+                </button>
+              </form>
+            </div>
+
+            {/* Right: Current Admin Info & Delegation History */}
+            <div className="lg:col-span-6 space-y-4">
+              <div className="bg-[#F8F7FC] p-5 rounded-xl border border-[#E6E1F5] space-y-3">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-gray-700">Currently Assigned Admin</h3>
+                {targetEkubObj ? (
+                  <div className="bg-white p-4 rounded-xl border border-gray-200 text-xs space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-gray-900 text-sm">{targetEkubObj.adminName || 'Designated Admin'}</span>
+                      <span className="px-2 py-0.5 bg-purple-100 text-purple-800 font-bold rounded text-[10px]">ACTIVE ADMIN</span>
+                    </div>
+                    <p className="text-gray-500 font-mono text-[11px]">UID: {targetEkubObj.adminId}</p>
+                    <p className="text-gray-500">Ekub: <strong>{targetEkubObj.name}</strong></p>
+                    <p className="text-gray-500">Created: {targetEkubObj.createdAt.split('T')[0]}</p>
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-400">No Ekub selected.</p>
+                )}
+              </div>
+
+              {/* Admin History Audit Trail */}
+              <div className="bg-[#F8F7FC] p-5 rounded-xl border border-[#E6E1F5] space-y-3">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-gray-700">Admin Delegation History</h3>
+                {targetEkubObj?.adminHistory && targetEkubObj.adminHistory.length > 0 ? (
+                  <div className="space-y-2">
+                    {targetEkubObj.adminHistory.map((hist, idx) => (
+                      <div key={idx} className="bg-white p-3 rounded-lg border border-gray-200 text-[11px] space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-gray-900">{hist.newAdminName || hist.newAdminId}</span>
+                          <span className="text-gray-400 font-mono">{hist.assignedAt.split('T')[0]}</span>
+                        </div>
+                        <p className="text-gray-500">
+                          Assigned by: <span className="font-mono text-gray-700">{hist.assignedBy}</span>
+                        </p>
+                        {hist.previousAdminId && (
+                          <p className="text-gray-400">Previous Admin: <span className="font-mono">{hist.previousAdminId}</span></p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-400">No previous reassignments recorded for this circle.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* TAB 4: DISPUTES & TICKETS */}
       {activeTab === 'disputes' && (
         <div className="bg-white rounded-2xl border border-[#E6E1F5] p-6 shadow-sm">
@@ -501,11 +824,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             Inquiries and dispute submissions regarding payment verification or turn eligibility.
           </p>
 
-          {supportTickets.length === 0 ? (
+          {openTickets.length === 0 ? (
             <p className="text-xs text-gray-500 py-6 text-center">No open disputes filed.</p>
           ) : (
             <div className="space-y-3">
-              {supportTickets.map((t) => (
+              {openTickets.map((t) => (
                 <div key={t.id} className="p-4 rounded-xl bg-[#F8F7FC] border border-[#E6E1F5]">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-gray-900">{t.subject}</span>
@@ -533,7 +856,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 Immutable System Audit Logs
               </h2>
               <p className="text-xs text-gray-500">
-                Every sensitive financial action (draw execution, payment verification, payout disbursement) creates a permanent record.
+                Every sensitive financial action (draw execution, payment verification, payout disbursement, admin delegation) creates a permanent record.
               </p>
             </div>
           </div>
@@ -596,7 +919,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               type="button"
               onClick={() => setInspectReceipt(null)}
               aria-label="Close modal"
-              className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-xl transition-colors"
+              className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-xl transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -621,7 +944,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <button
                 type="button"
                 onClick={() => setInspectReceipt(null)}
-                className="px-4 py-2.5 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-xs font-semibold text-gray-700 transition-colors"
+                className="px-4 py-2.5 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-xs font-semibold text-gray-700 transition-colors cursor-pointer"
               >
                 Cancel
               </button>
@@ -631,7 +954,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   handleVerify(inspectReceipt);
                   setInspectReceipt(null);
                 }}
-                className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors shadow-xs"
+                className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors shadow-xs cursor-pointer"
               >
                 Verify Now
               </button>
@@ -665,7 +988,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <button
                 type="button"
                 onClick={() => setRejectingContribId(null)}
-                className="px-4 py-2.5 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-xs font-semibold text-gray-700 transition-colors"
+                className="px-4 py-2.5 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-xs font-semibold text-gray-700 transition-colors cursor-pointer"
               >
                 Cancel
               </button>
@@ -675,7 +998,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   const target = contributions.find(c => c.id === rejectingContribId);
                   if (target) handleReject(target);
                 }}
-                className="px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-colors shadow-xs"
+                className="px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-colors shadow-xs cursor-pointer"
               >
                 Confirm Rejection
               </button>
@@ -710,7 +1033,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <button
                 type="button"
                 onClick={() => setDisbursingPayoutId(null)}
-                className="px-4 py-2.5 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-xs font-semibold text-gray-700 transition-colors"
+                className="px-4 py-2.5 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-xs font-semibold text-gray-700 transition-colors cursor-pointer"
               >
                 Cancel
               </button>
@@ -720,7 +1043,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   const target = payouts.find(p => p.id === disbursingPayoutId);
                   if (target) handleDisbursePayout(target);
                 }}
-                className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors shadow-xs"
+                className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors shadow-xs cursor-pointer"
               >
                 Confirm Disbursement
               </button>

@@ -21,7 +21,8 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../firebase/AuthContext';
 import { useTranslation } from '../locales/TranslationContext';
-import { AppNotification, UserRole } from '../types';
+import { AppNotification } from '../types';
+import { YegnaEkubLogo } from './YegnaEkubLogo';
 
 interface NavbarProps {
   currentTab?: string;
@@ -50,7 +51,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const currentTab = activeTabProp || currentTabProp || 'dashboard';
   const setCurrentTab = onNavigateProp || setCurrentTabProp || (() => {});
-  const { userProfile, switchDemoUser, signOut, isAdmin, isOrganizer } = useAuth();
+  const { userProfile, signOut, isAdmin, isOrganizer } = useAuth();
   const { language, toggleLanguage, t } = useTranslation();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -59,51 +60,20 @@ export const Navbar: React.FC<NavbarProps> = ({
     ? unreadCountProp 
     : (Array.isArray(notifications) ? notifications.filter(n => !n.read).length : 0);
 
-  const DEMO_PERSONAS = [
-    {
-      uid: 'demo-user-yared-admin',
-      fullName: 'Yared Abegaz',
-      email: 'yared.abegaz@gmail.com',
-      role: 'admin' as UserRole,
-      phone: '+251 91 184 9284',
-      badge: 'Super Admin / Organizer',
-    },
-    {
-      uid: 'demo-user-abebe',
-      fullName: 'Abebe Bikila',
-      email: 'abebe.b@example.com',
-      role: 'member' as UserRole,
-      phone: '+251 91 100 0001',
-      badge: 'Member (Cycle 1 Winner)',
-    },
-    {
-      uid: 'demo-user-sara',
-      fullName: 'Sara Tadesse',
-      email: 'sara.t@example.com',
-      role: 'member' as UserRole,
-      phone: '+251 91 100 0002',
-      badge: 'Member (Cycle 2 Winner)',
-    },
-    {
-      uid: 'demo-user-dawit',
-      fullName: 'Dawit Kebede',
-      email: 'dawit.k@example.com',
-      role: 'member' as UserRole,
-      phone: '+251 91 100 0003',
-      badge: 'Member (Cycle 3 Winner)',
-    },
-  ];
-
   return (
     <header className="sticky top-0 z-40 h-16 bg-[#1C1132] text-white border-b-2 border-[#7856FF]/30 shadow-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-full">
         <div className="flex items-center justify-between h-full">
           
-          {/* Brand Logo - Name Only */}
+          {/* Refined Brand Logo with Creative Growth 'k' */}
           <div className="flex items-center cursor-pointer" onClick={() => setCurrentTab('dashboard')}>
-            <span className="font-bold text-xl tracking-tight text-white font-sans">
-              Yegna<span className="text-[#7856FF]">Ekub</span>
-            </span>
+            <YegnaEkubLogo
+              variant="full"
+              size="sm"
+              theme="dark"
+              showSubtext={true}
+              subtextText={language === 'am' ? 'ዲጂታል ዕቁብ' : 'DIGITAL ROSCA'}
+            />
           </div>
 
           {/* Desktop Navigation Links */}
@@ -262,36 +232,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     </span>
                   </div>
 
-                  <div className="px-3 py-2 border-b border-gray-100">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-[#1C1132] px-2 mb-1">
-                      Switch Demo Role / Account
-                    </p>
-                    <div className="space-y-1">
-                      {DEMO_PERSONAS.map((p) => {
-                        const isActive = userProfile?.uid === p.uid || userProfile?.email === p.email;
-                        return (
-                          <button
-                            key={p.uid}
-                            onClick={() => {
-                              switchDemoUser(p);
-                              setShowUserMenu(false);
-                            }}
-                            className={`w-full flex items-center justify-between px-2.5 py-2 rounded-sm text-xs text-left transition-colors ${
-                              isActive ? 'bg-[#7856FF]/10 text-[#7856FF] font-bold' : 'hover:bg-gray-100 text-gray-700'
-                            }`}
-                          >
-                            <div>
-                              <p className="font-semibold text-gray-900">{p.fullName}</p>
-                              <p className="text-[10px] text-gray-500">{p.badge}</p>
-                            </div>
-                            {isActive && <Check className="w-4 h-4 text-[#7856FF]" />}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="px-2 pt-1">
+                  <div className="px-2 py-2 space-y-1">
                     <button
                       onClick={() => {
                         setShowUserMenu(false);
@@ -301,6 +242,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                     >
                       <Scale className="w-3.5 h-3.5 text-[#7856FF]" />
                       <span>Legal, Terms & Disclosures</span>
+                    </button>
+
+                    <button
+                      onClick={async () => {
+                        setShowUserMenu(false);
+                        await signOut();
+                      }}
+                      className="w-full flex items-center space-x-2 px-3 py-2 rounded-sm text-xs text-red-600 hover:bg-red-50 transition-colors uppercase tracking-wider font-semibold text-[11px]"
+                    >
+                      <LogOut className="w-3.5 h-3.5 text-red-600" />
+                      <span>Sign Out</span>
                     </button>
                   </div>
                 </div>

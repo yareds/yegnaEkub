@@ -1,4 +1,4 @@
-export type UserRole = 'member' | 'organizer' | 'admin';
+export type UserRole = 'super_admin' | 'member';
 
 export type VerificationStatus = 'unverified' | 'pending' | 'verified';
 
@@ -25,8 +25,19 @@ export interface Ekub {
   id: string;
   name: string;
   description: string;
-  organizerId: string;
-  organizerName: string;
+  adminId: string; // uid of the current Ekub Admin, assigned by Super Admin
+  adminName?: string;
+  adminHistory?: { 
+    uid?: string; 
+    previousAdminId?: string; 
+    newAdminId?: string; 
+    newAdminName?: string; 
+    assignedAt: string; 
+    assignedBy: string; 
+  }[];
+  createdBy?: string;
+  organizerId?: string;
+  organizerName?: string;
   status: EkubStatus;
   contributionAmount: number;
   currency: 'ETB';
@@ -52,7 +63,7 @@ export interface EkubMember {
   email?: string;
   phoneNumber?: string;
   photoURL?: string;
-  role: 'member' | 'organizer';
+  role: 'admin' | 'member';
   status: 'active' | 'pending' | 'suspended';
   joinedAt: string;
   contributionStatus: 'paid' | 'pending' | 'overdue';
@@ -159,11 +170,11 @@ export interface Draw {
   nonce?: number;
   verificationHash?: string;
   verificationProof?: {
-    combinedEntropy: string;
-    hashResult: string;
-    rawDecimal: string;
-    winningIndex: number;
-    explanation: string;
+    combinedEntropy?: string;
+    hashResult?: string;
+    rawDecimal?: string;
+    winningIndex?: number;
+    explanation?: string;
   };
   createdAt: string;
 }

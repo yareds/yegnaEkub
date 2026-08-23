@@ -32,7 +32,7 @@ import {
 import { Ekub, Contribution, Draw, Payout, AppNotification, SupportTicket } from './types';
 
 function MainAppContent() {
-  const { userProfile, isAdmin } = useAuth();
+  const { userProfile, isSuperAdmin } = useAuth();
   const { t, language } = useTranslation();
 
   // Navigation State
@@ -48,6 +48,10 @@ function MainAppContent() {
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Role verification: is the user a Super Admin or the designated admin of at least one Ekub?
+  const isEkubAdminOfAny = Boolean(userProfile?.uid && ekubs.some(e => e.adminId === userProfile.uid));
+  const hasAdminAccess = isSuperAdmin || isEkubAdminOfAny;
+
   // Modals
   const [contributeEkub, setContributeEkub] = useState<Ekub | null>(null);
   const [liveDrawEkub, setLiveDrawEkub] = useState<Ekub | null>(null);
@@ -58,15 +62,24 @@ function MainAppContent() {
   const [showLegal, setShowLegal] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
 
+  // Redirect guard: if on admin tab but lack authorization, redirect to dashboard
+  useEffect(() => {
+    if (!loading && activeTab === 'admin' && !hasAdminAccess) {
+      setActiveTab('dashboard');
+    }
+  }, [activeTab, loading, hasAdminAccess]);
+
   const refreshAllData = async () => {
     try {
+      const isSuperAdminUser = userProfile?.role === 'super_admin' || (userProfile?.role as string) === 'admin';
+      const userIdParam = isSuperAdminUser ? undefined : userProfile?.uid;
       const [eList, cList, dList, pList, nList, tList] = await Promise.all([
         getEkubs(),
-        getContributions(),
+        getContributions(undefined, userIdParam),
         getDraws(),
-        getPayouts(),
+        getPayouts(undefined, userIdParam),
         getNotifications(userProfile?.uid),
-        getSupportTickets(),
+        getSupportTickets(userIdParam),
       ]);
 
       setEkubs(Array.isArray(eList) ? eList : []);
@@ -196,7 +209,7 @@ function MainAppContent() {
               />
             )}
 
-            {activeTab === 'admin' && (
+            {activeTab === 'admin' && hasAdminAccess && (
               <AdminDashboard
                 ekubs={ekubs}
                 contributions={contributions}

@@ -108,7 +108,7 @@ export const EkubDetail: React.FC<EkubDetailProps> = ({
               {ekub.description}
             </p>
             <p className="text-xs text-gray-500 mt-2">
-              {t.organizer}: <strong className="text-gray-800">{ekub.organizerName}</strong> • Created on {ekub.startDate}
+              Admin: <strong className="text-gray-800">{ekub.adminName || ekub.organizerName || 'Admin'}</strong> • Created on {ekub.startDate}
             </p>
           </div>
 

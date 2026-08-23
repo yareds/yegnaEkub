@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from '../locales/TranslationContext';
 import { ETHIOPIAN_BANK_ACCOUNTS } from '../data/demoData';
+import { YegnaEkubLogo } from './YegnaEkubLogo';
 
 interface LandingPageProps {
   onStartEkub: () => void;
@@ -52,6 +53,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[300px] bg-[#7856FF]/20 blur-[100px] rounded-full pointer-events-none" />
 
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
+          {/* Refined Brand Mark Showcase */}
+          <div className="inline-flex items-center justify-center mb-6">
+            <YegnaEkubLogo
+              variant="full"
+              size="lg"
+              theme="dark"
+              showSubtext={true}
+              subtextText={language === 'am' ? 'ዲጂታል የዕቁብና የፋይናንስ ዕድገት መድረክ' : 'PROVABLY FAIR DIGITAL ROSCA PLATFORM'}
+            />
+          </div>
+
           <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 bg-[#7856FF]/20 border border-[#7856FF]/40 text-[#C4B5FD] text-[11px] font-bold uppercase tracking-[0.2em] mb-6 rounded-full">
             <Sparkles className="w-3.5 h-3.5 text-[#7856FF]" />
             <span>{language === 'am' ? 'የኢትዮጵያ ቀዳሚው ዲጂታል የዕቁብ መድረክ' : "Ethiopia's First Provably Fair Digital RoSCA"}</span>
@@ -338,6 +350,58 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         </div>
       </section>
 
+      {/* Brand Identity & Growth Symbolism Section */}
+      <section className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="bg-[#1C1132] text-white p-8 sm:p-10 border border-[#7856FF]/30 rounded-2xl shadow-xl relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-80 h-80 bg-[#7856FF]/10 blur-[80px] rounded-full pointer-events-none" />
+          
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center relative z-10">
+            <div className="lg:col-span-4 flex flex-col items-center lg:items-start text-center lg:text-left space-y-4">
+              <div className="p-4 bg-[#2B1B48] border border-[#7856FF]/40 rounded-2xl shadow-lg">
+                <YegnaEkubLogo variant="mark" size="2xl" theme="dark" />
+              </div>
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#C4B5FD]">Brand Mark Anatomy</span>
+                <h3 className="text-lg font-bold text-white mt-1">The 'k' Growth Vector</h3>
+                <p className="text-xs text-white/70 mt-1">Engineered to symbolize collective financial ascent and enterprise scaling.</p>
+              </div>
+            </div>
+
+            <div className="lg:col-span-8 grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+              <div className="p-4 bg-white/5 border border-white/10 rounded-xl">
+                <div className="w-7 h-7 rounded-lg bg-[#7856FF]/30 text-[#C4B5FD] flex items-center justify-center font-bold mb-2.5">
+                  1
+                </div>
+                <h4 className="font-bold text-white uppercase tracking-wider text-[11px] mb-1">Trust Pillar</h4>
+                <p className="text-white/70 leading-relaxed">
+                  The vertical stem grounds the system in institutional integrity, tamper-proof ledgers, and verified Ethiopian bank integrations.
+                </p>
+              </div>
+
+              <div className="p-4 bg-white/5 border border-white/10 rounded-xl">
+                <div className="w-7 h-7 rounded-lg bg-[#7856FF]/30 text-[#C4B5FD] flex items-center justify-center font-bold mb-2.5">
+                  2
+                </div>
+                <h4 className="font-bold text-white uppercase tracking-wider text-[11px] mb-1">Community Base</h4>
+                <p className="text-white/70 leading-relaxed">
+                  The lower diagonal anchors democratic RoSCA peer governance, collective pooling, and social savings discipline.
+                </p>
+              </div>
+
+              <div className="p-4 bg-white/5 border border-[#7856FF]/50 bg-[#7856FF]/10 rounded-xl">
+                <div className="w-7 h-7 rounded-lg bg-[#7856FF] text-white flex items-center justify-center font-bold mb-2.5 shadow-xs">
+                  3
+                </div>
+                <h4 className="font-bold text-[#C4B5FD] uppercase tracking-wider text-[11px] mb-1">Growth Arrow</h4>
+                <p className="text-white/80 leading-relaxed">
+                  The upper arm surges at 45° as a rising trend arrow, representing capital injection, business expansion, and wealth creation.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Supported Ethiopian Payment Gateways */}
       <section className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
         <h2 className="text-[10px] uppercase tracking-[0.2em] text-[#7856FF] font-bold mb-1">
@@ -360,19 +424,24 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
       {/* Legal & Compliance Footer Disclaimer */}
       <section className="max-w-4xl mx-auto px-4 text-center">
-        <div className="p-4 bg-white border border-[#E6E1F5] rounded-xl text-[11px] text-gray-500 leading-relaxed shadow-sm">
-          <p className="font-bold text-[#1C1132] uppercase tracking-wider mb-1">
-            ⚖️ Legal & Regulatory Disclosure for Ethiopian RoSCA Platform:
-          </p>
-          <p>
-            YegnaEkub operates as an informational software platform facilitating traditional, member-managed Ethiopian Ekub rotating savings agreements. YegnaEkub is not a licensed commercial bank, depository institution, or investment fund. All participants agree to the mutual community RoSCA agreement.
-          </p>
-          <button 
-            onClick={onOpenLegal}
-            className="text-[#7856FF] font-bold uppercase tracking-wider underline mt-2 hover:text-[#6340FF] inline-block"
-          >
-            Read Full Terms of Service, Ekub Agreement & Risk Disclosures
-          </button>
+        <div className="p-6 bg-white border border-[#E6E1F5] rounded-2xl text-[11px] text-gray-500 leading-relaxed shadow-sm space-y-4">
+          <div className="flex justify-center">
+            <YegnaEkubLogo variant="full" size="sm" theme="light" showSubtext={true} subtextText="ETHIOPIAN DIGITAL ROSCA" />
+          </div>
+          <div className="border-t border-[#E6E1F5] pt-4">
+            <p className="font-bold text-[#1C1132] uppercase tracking-wider mb-1">
+              ⚖️ Legal & Regulatory Disclosure for Ethiopian RoSCA Platform:
+            </p>
+            <p>
+              YegnaEkub operates as an informational software platform facilitating traditional, member-managed Ethiopian Ekub rotating savings agreements. YegnaEkub is not a licensed commercial bank, depository institution, or investment fund. All participants agree to the mutual community RoSCA agreement.
+            </p>
+            <button 
+              onClick={onOpenLegal}
+              className="text-[#7856FF] font-bold uppercase tracking-wider underline mt-2 hover:text-[#6340FF] inline-block"
+            >
+              Read Full Terms of Service, Ekub Agreement & Risk Disclosures
+            </button>
+          </div>
         </div>
       </section>
     </div>

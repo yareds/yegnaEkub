@@ -37,10 +37,11 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
   const filtered = (ekubs || []).filter((e) => {
     if (frequencyFilter !== 'all' && e.frequency !== frequencyFilter) return false;
     if (searchTerm) {
+      const adminDisplay = e.adminName || e.organizerName || '';
       const match = 
         e.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         e.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        e.organizerName?.toLowerCase().includes(searchTerm.toLowerCase());
+        adminDisplay.toLowerCase().includes(searchTerm.toLowerCase());
       if (!match) return false;
     }
     return true;
@@ -158,7 +159,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
 
             <div className="mt-5 pt-4 border-t border-gray-100 flex items-center justify-between">
               <span className="text-[11px] text-gray-500">
-                Organizer: <strong className="text-gray-800">{e.organizerName.split(' ')[0]}</strong>
+                Admin: <strong className="text-gray-800">{(e.adminName || e.organizerName || 'Admin').split(' ')[0]}</strong>
               </span>
 
               <button

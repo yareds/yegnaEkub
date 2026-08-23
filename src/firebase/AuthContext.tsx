@@ -10,7 +10,7 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db, googleProvider } from './config';
-import { UserProfile, UserRole } from '../types';
+import { UserProfile } from '../types';
 
 interface AuthContextType {
   user: User | null;
@@ -20,8 +20,8 @@ interface AuthContextType {
   signInWithEmail: (email: string, pass: string) => Promise<void>;
   signUpWithEmail: (email: string, pass: string, fullName: string, phone: string) => Promise<void>;
   signOut: () => Promise<void>;
-  switchDemoUser: (demoUser: { uid: string; email: string; fullName: string; role: UserRole; phone: string }) => Promise<void>;
   isAdmin: boolean;
+  isSuperAdmin: boolean;
   isOrganizer: boolean;
   refreshProfile: () => Promise<void>;
 }
@@ -33,25 +33,47 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Load user profile from Firestore or create default
+  // Load user profile from Firestore or initialize new member profile
   const fetchOrCreateProfile = async (firebaseUser: User, extraData?: Partial<UserProfile>) => {
     try {
+      // Check if user is a designated super admin in /admins/{uid} or bootstrapped email
+      let isDesignatedAdmin = firebaseUser.email === 'yared.abegaz@gmail.com';
+      try {
+        const adminDoc = await getDoc(doc(db, 'admins', firebaseUser.uid));
+        if (adminDoc.exists()) {
+          isDesignatedAdmin = true;
+        } else if (isDesignatedAdmin) {
+          // Self-seed admin document for super admin email
+          await setDoc(doc(db, 'admins', firebaseUser.uid), {
+            uid: firebaseUser.uid,
+            email: firebaseUser.email,
+            assignedAt: new Date().toISOString(),
+            role: 'super_admin'
+          });
+        }
+      } catch (adminErr) {
+        // Fallback or unauthenticated check
+      }
+
       const userRef = doc(db, 'users', firebaseUser.uid);
       const userSnap = await getDoc(userRef);
 
       if (userSnap.exists()) {
         const data = userSnap.data() as UserProfile;
+        if (isDesignatedAdmin && data.role !== 'super_admin') {
+          data.role = 'super_admin';
+        }
         setUserProfile(data);
         return data;
       } else {
-        const isDefaultAdmin = firebaseUser.email === 'yared.abegaz@gmail.com' || firebaseUser.email?.includes('admin');
+        // New user profile: created with default 'member' role unless in /admins
         const newProfile: UserProfile = {
           uid: firebaseUser.uid,
           fullName: firebaseUser.displayName || extraData?.fullName || 'Yegna Member',
           email: firebaseUser.email || '',
           phoneNumber: extraData?.phoneNumber || '+251 91 123 4567',
           photoURL: firebaseUser.photoURL || undefined,
-          role: isDefaultAdmin ? 'admin' : (extraData?.role || 'member'),
+          role: isDesignatedAdmin ? 'super_admin' : 'member',
           preferredLanguage: 'en',
           preferredPaymentMethod: 'telebirr',
           verificationStatus: 'verified',
@@ -63,22 +85,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return newProfile;
       }
     } catch (err) {
-      console.warn('Firestore profile fetch fallback (offline/initial):', err);
-      // Fallback local profile
-      const isDefaultAdmin = firebaseUser.email === 'yared.abegaz@gmail.com' || firebaseUser.email?.includes('admin');
-      const fallback: UserProfile = {
-        uid: firebaseUser.uid,
-        fullName: firebaseUser.displayName || 'Yegna User',
-        email: firebaseUser.email || '',
-        phoneNumber: '+251 91 123 4567',
-        role: isDefaultAdmin ? 'admin' : 'member',
-        preferredLanguage: 'en',
-        preferredPaymentMethod: 'telebirr',
-        verificationStatus: 'verified',
-        createdAt: new Date().toISOString(),
-      };
-      setUserProfile(fallback);
-      return fallback;
+      console.error('Failed to fetch/create user profile in Firestore:', err);
+      setUserProfile(null);
+      return null;
     }
   };
 
@@ -88,31 +97,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (currentUser) {
         await fetchOrCreateProfile(currentUser);
       } else {
-        // Auto-seed or set default guest user if no session for smooth first-time preview experience
-        const storedDemo = localStorage.getItem('yegna_active_demo_user');
-        if (storedDemo) {
-          try {
-            const parsed = JSON.parse(storedDemo);
-            setUserProfile(parsed);
-          } catch {
-            setUserProfile(null);
-          }
-        } else {
-          // Default to Yared Abegaz (Admin / Organizer) for high fidelity preview
-          const defaultAdminProfile: UserProfile = {
-            uid: 'demo-user-yared-admin',
-            fullName: 'Yared Abegaz (Admin)',
-            email: 'yared.abegaz@gmail.com',
-            phoneNumber: '+251 91 184 9284',
-            role: 'admin',
-            preferredLanguage: 'en',
-            preferredPaymentMethod: 'telebirr',
-            verificationStatus: 'verified',
-            createdAt: new Date().toISOString(),
-          };
-          setUserProfile(defaultAdminProfile);
-          localStorage.setItem('yegna_active_demo_user', JSON.stringify(defaultAdminProfile));
-        }
+        // Unauthenticated: no fabricated profiles or default admin
+        setUserProfile(null);
       }
       setLoading(false);
     });
@@ -123,46 +109,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signInWithGoogle = async () => {
     try {
       const result = await signInWithPopup(auth, googleProvider);
-      await fetchOrCreateProfile(result.user);
+      if (result.user) {
+        await fetchOrCreateProfile(result.user);
+      }
     } catch (err: unknown) {
-      console.warn('Popup blocked or error, falling back to profile setup:', err);
-      // If popup fails in iframe, set active authenticated demo
-      const demoAdmin: UserProfile = {
-        uid: 'user-google-yared',
-        fullName: 'Yared Abegaz',
-        email: 'yared.abegaz@gmail.com',
-        phoneNumber: '+251 91 184 9284',
-        role: 'admin',
-        preferredLanguage: 'en',
-        preferredPaymentMethod: 'telebirr',
-        verificationStatus: 'verified',
-        createdAt: new Date().toISOString(),
-      };
-      setUserProfile(demoAdmin);
-      localStorage.setItem('yegna_active_demo_user', JSON.stringify(demoAdmin));
+      console.error('Google Sign In failed:', err);
+      throw err;
     }
   };
 
   const signInWithEmail = async (email: string, pass: string) => {
     try {
       const result = await signInWithEmailAndPassword(auth, email, pass);
-      await fetchOrCreateProfile(result.user);
+      if (result.user) {
+        await fetchOrCreateProfile(result.user);
+      }
     } catch (err: unknown) {
-      // Fallback demo simulation if Firebase Auth user does not exist yet
-      const role: UserRole = email.includes('admin') || email === 'yared.abegaz@gmail.com' ? 'admin' : 'member';
-      const simProfile: UserProfile = {
-        uid: `user-${email.replace(/[^a-zA-Z0-9]/g, '')}`,
-        fullName: email.split('@')[0].toUpperCase(),
-        email: email,
-        phoneNumber: '+251 91 234 5678',
-        role: role,
-        preferredLanguage: 'en',
-        preferredPaymentMethod: 'cbe',
-        verificationStatus: 'verified',
-        createdAt: new Date().toISOString(),
-      };
-      setUserProfile(simProfile);
-      localStorage.setItem('yegna_active_demo_user', JSON.stringify(simProfile));
+      console.error('Email Sign In failed:', err);
+      throw err;
     }
   };
 
@@ -174,48 +138,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await fetchOrCreateProfile(result.user, { fullName, phoneNumber: phone });
       }
     } catch (err: unknown) {
-      const isDefaultAdmin = email.includes('admin') || email === 'yared.abegaz@gmail.com';
-      const newProfile: UserProfile = {
-        uid: `user-${Date.now()}`,
-        fullName,
-        email,
-        phoneNumber: phone,
-        role: isDefaultAdmin ? 'admin' : 'member',
-        preferredLanguage: 'en',
-        preferredPaymentMethod: 'telebirr',
-        verificationStatus: 'verified',
-        createdAt: new Date().toISOString(),
-      };
-      setUserProfile(newProfile);
-      localStorage.setItem('yegna_active_demo_user', JSON.stringify(newProfile));
+      console.error('Email Sign Up failed:', err);
+      throw err;
     }
   };
 
   const signOut = async () => {
     try {
       await firebaseSignOut(auth);
-    } catch {
-      // ignore
+    } catch (err) {
+      console.error('Sign Out failed:', err);
     }
-    localStorage.removeItem('yegna_active_demo_user');
     setUserProfile(null);
     setUser(null);
-  };
-
-  const switchDemoUser = async (demoUser: { uid: string; email: string; fullName: string; role: UserRole; phone: string }) => {
-    const profile: UserProfile = {
-      uid: demoUser.uid,
-      fullName: demoUser.fullName,
-      email: demoUser.email,
-      phoneNumber: demoUser.phone,
-      role: demoUser.role,
-      preferredLanguage: 'en',
-      preferredPaymentMethod: 'telebirr',
-      verificationStatus: 'verified',
-      createdAt: new Date().toISOString(),
-    };
-    setUserProfile(profile);
-    localStorage.setItem('yegna_active_demo_user', JSON.stringify(profile));
   };
 
   const refreshProfile = async () => {
@@ -224,7 +159,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const isAdmin = userProfile?.role === 'admin' || userProfile?.email === 'yared.abegaz@gmail.com';
+  const isSuperAdmin = userProfile?.role === 'super_admin' || (userProfile?.role as string) === 'admin';
+  const isAdmin = isSuperAdmin;
   const isOrganizer = isAdmin || userProfile?.role === 'organizer';
 
   return (
@@ -237,8 +173,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         signInWithEmail,
         signUpWithEmail,
         signOut,
-        switchDemoUser,
         isAdmin,
+        isSuperAdmin,
         isOrganizer,
         refreshProfile,
       }}

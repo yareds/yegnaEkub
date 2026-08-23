@@ -62,6 +62,7 @@ export const PayoutWorkflowModal: React.FC<PayoutWorkflowModalProps> = ({
 
     try {
       await submitPayoutAccountDetails(
+        payout.ekubId,
         payout.id,
         {
           bankName,

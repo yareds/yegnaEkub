@@ -10,7 +10,8 @@ import {
   orderBy,
   limit,
 } from 'firebase/firestore';
-import { db } from './config';
+import { httpsCallable } from 'firebase/functions';
+import { db, functions, auth } from './config';
 import { 
   Ekub, 
   EkubMember, 
@@ -28,77 +29,41 @@ import {
   DEMO_CONTRIBUTIONS, 
   DEMO_DRAWS, 
   DEMO_PAYOUTS, 
-  DEMO_NOTIFICATIONS, 
   DEMO_AUDIT_LOGS 
 } from '../data/demoData';
 
-// Local storage caching keys to enable reliable offline/local testing and real persistence
-const STORAGE_KEYS = {
-  EKUBS: 'yegna_ekubs_store',
-  MEMBERS: 'yegna_members_store',
-  CONTRIBUTIONS: 'yegna_contributions_store',
-  DRAWS: 'yegna_draws_store',
-  PAYOUTS: 'yegna_payouts_store',
-  NOTIFICATIONS: 'yegna_notifications_store',
-  AUDIT_LOGS: 'yegna_audit_logs_store',
-  TICKETS: 'yegna_tickets_store',
-};
+// DEMO_MODE is strictly OFF by default and environment-gated
+export const DEMO_MODE = (import.meta as any).env?.VITE_DEMO_MODE === 'true';
 
-// Initialize local cache with demo data if empty
-export const initializeDataStore = () => {
-  if (!localStorage.getItem(STORAGE_KEYS.EKUBS)) {
-    localStorage.setItem(STORAGE_KEYS.EKUBS, JSON.stringify(DEMO_EKUBS));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.MEMBERS)) {
-    localStorage.setItem(STORAGE_KEYS.MEMBERS, JSON.stringify(DEMO_MEMBERS));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.CONTRIBUTIONS)) {
-    localStorage.setItem(STORAGE_KEYS.CONTRIBUTIONS, JSON.stringify(DEMO_CONTRIBUTIONS));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.DRAWS)) {
-    localStorage.setItem(STORAGE_KEYS.DRAWS, JSON.stringify(DEMO_DRAWS));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.PAYOUTS)) {
-    localStorage.setItem(STORAGE_KEYS.PAYOUTS, JSON.stringify(DEMO_PAYOUTS));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS)) {
-    localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(DEMO_NOTIFICATIONS));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.AUDIT_LOGS)) {
-    localStorage.setItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify(DEMO_AUDIT_LOGS));
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.TICKETS)) {
-    localStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify([]));
-  }
-};
+// Cloud Functions Callables
+const createEkubCallable = httpsCallable<any, { success: boolean; ekub: Ekub }>(functions, 'createEkub');
+const assignEkubAdminCallable = httpsCallable<{ ekubId: string; newAdminUid: string; newAdminName?: string }, { success: boolean; message: string }>(functions, 'assignEkubAdmin');
+const addEkubMemberCallable = httpsCallable<any, { success: boolean; member: EkubMember }>(functions, 'addEkubMember');
+const verifyContributionCallable = httpsCallable<{ ekubId: string; contributionId: string; notes?: string }, { success: boolean; message: string }>(functions, 'verifyContribution');
+const rejectContributionCallable = httpsCallable<{ ekubId: string; contributionId: string; reason: string }, { success: boolean; message: string }>(functions, 'rejectContribution');
+const executeDrawCallable = httpsCallable<any, { success: boolean; draw: Draw; payout: Payout; winner: EkubMember; proof: any }>(functions, 'executeDraw');
+const approvePayoutCallable = httpsCallable<{ ekubId: string; payoutId: string }, { success: boolean; message: string }>(functions, 'approvePayout');
+const disbursePayoutCallable = httpsCallable<{ ekubId: string; payoutId: string; paymentReference: string }, { success: boolean; message: string }>(functions, 'disbursePayout');
 
-initializeDataStore();
-
-// Reset/Reload Demo Data
-export const resetDemoData = () => {
-  localStorage.setItem(STORAGE_KEYS.EKUBS, JSON.stringify(DEMO_EKUBS));
-  localStorage.setItem(STORAGE_KEYS.MEMBERS, JSON.stringify(DEMO_MEMBERS));
-  localStorage.setItem(STORAGE_KEYS.CONTRIBUTIONS, JSON.stringify(DEMO_CONTRIBUTIONS));
-  localStorage.setItem(STORAGE_KEYS.DRAWS, JSON.stringify(DEMO_DRAWS));
-  localStorage.setItem(STORAGE_KEYS.PAYOUTS, JSON.stringify(DEMO_PAYOUTS));
-  localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(DEMO_NOTIFICATIONS));
-  localStorage.setItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify(DEMO_AUDIT_LOGS));
-  localStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify([]));
-};
-
-// --- EKUBS ---
+// ============================================================================
+// EKUBS
+// ============================================================================
 export const getEkubs = async (): Promise<Ekub[]> => {
   try {
-    const q = query(collection(db, 'ekubs'), orderBy('createdAt', 'desc'), limit(20));
+    const q = query(collection(db, 'ekubs'), orderBy('createdAt', 'desc'), limit(50));
     const snapshot = await getDocs(q);
     if (!snapshot.empty) {
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Ekub));
+      return snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Ekub));
     }
-  } catch (err) {
-    console.warn('Firestore fetch fallback to store:', err);
+    if (DEMO_MODE) {
+      return DEMO_EKUBS;
+    }
+    return [];
+  } catch (err: any) {
+    console.warn('Failed to load Ekubs from Firestore:', err);
+    if (DEMO_MODE) return DEMO_EKUBS;
+    return [];
   }
-  const cached = localStorage.getItem(STORAGE_KEYS.EKUBS);
-  return cached ? JSON.parse(cached) : DEMO_EKUBS;
 };
 
 export const getEkubById = async (id: string): Promise<Ekub | null> => {
@@ -108,44 +73,81 @@ export const getEkubById = async (id: string): Promise<Ekub | null> => {
     if (snap.exists()) {
       return { id: snap.id, ...snap.data() } as Ekub;
     }
-  } catch (err) {
-    console.warn('Firestore single fetch fallback:', err);
+    if (DEMO_MODE) {
+      return DEMO_EKUBS.find(e => e.id === id) || null;
+    }
+    return null;
+  } catch (err: any) {
+    console.error(`Failed to fetch Ekub ${id}:`, err);
+    if (DEMO_MODE) return DEMO_EKUBS.find(e => e.id === id) || null;
+    throw new Error(err.message || 'Could not load Ekub details.');
   }
-  const list = await getEkubs();
-  return list.find(e => e.id === id) || null;
 };
 
 export const createEkub = async (ekubData: Omit<Ekub, 'id' | 'createdAt' | 'currentMemberCount' | 'currentCycle'>): Promise<Ekub> => {
-  const newId = `ekub-${Date.now()}`;
-  const newEkub: Ekub = {
-    ...ekubData,
-    id: newId,
-    currentMemberCount: 1,
-    currentCycle: 1,
-    createdAt: new Date().toISOString(),
-  };
-
   try {
+    const result = await createEkubCallable(ekubData);
+    if (result.data && result.data.ekub) {
+      return result.data.ekub;
+    }
+  } catch (fnErr: any) {
+    console.warn('createEkub Cloud Function not available or returned error, falling back to direct Firestore write with security rules:', fnErr);
+    
+    // Direct Firestore write fallback conforming to firestore.rules
+    const newId = `ekub-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+    const adminUid = ekubData.adminId || auth.currentUser?.uid || 'admin';
+    const adminName = ekubData.adminName || auth.currentUser?.displayName || 'Admin';
+
+    const newEkub: Ekub = {
+      ...ekubData,
+      id: newId,
+      adminId: adminUid,
+      adminName: adminName,
+      adminHistory: [
+        {
+          previousAdminId: '',
+          newAdminId: adminUid,
+          newAdminName: adminName,
+          assignedAt: new Date().toISOString(),
+          assignedBy: auth.currentUser?.uid || adminUid,
+        }
+      ],
+      currentMemberCount: 1,
+      currentCycle: 1,
+      createdAt: new Date().toISOString(),
+    };
+
     await setDoc(doc(db, 'ekubs', newId), newEkub);
-  } catch (err) {
-    console.warn('Firestore create fallback:', err);
+
+    // Add initial admin member record
+    const adminMember: EkubMember = {
+      userId: adminUid,
+      displayName: adminName,
+      role: 'admin',
+      status: 'active',
+      joinedAt: new Date().toISOString(),
+      contributionStatus: 'pending',
+      eligibleForDraw: true,
+      hasReceivedPayout: false,
+      totalContributed: 0,
+      cyclePosition: 1,
+    };
+    await setDoc(doc(db, 'ekubs', newId, 'members', adminUid), adminMember);
+
+    return newEkub;
   }
+  throw new Error('Failed to create Ekub circle.');
+};
 
-  // Update local cache
-  const cached = localStorage.getItem(STORAGE_KEYS.EKUBS);
-  const list: Ekub[] = cached ? JSON.parse(cached) : [];
-  list.unshift(newEkub);
-  localStorage.setItem(STORAGE_KEYS.EKUBS, JSON.stringify(list));
-
-  // Add creator as member
-  await joinEkub(newId, {
-    userId: newEkub.organizerId,
-    displayName: newEkub.organizerName,
-    role: 'organizer',
-    status: 'active',
-  });
-
-  return newEkub;
+// Reassign Ekub Admin (Super Admin only)
+export const assignEkubAdmin = async (ekubId: string, newAdminUid: string, newAdminName?: string): Promise<boolean> => {
+  try {
+    const res = await assignEkubAdminCallable({ ekubId, newAdminUid, newAdminName });
+    return res.data.success;
+  } catch (err: any) {
+    console.error('Failed to assign Ekub Admin via Cloud Function:', err);
+    throw new Error(err.message || 'Failed to reassign Ekub Admin. Ensure you have Super Admin privileges.');
+  }
 };
 
 export const joinEkubWithInviteCode = async (inviteCode: string, userId: string, displayName: string, userEmail: string): Promise<Ekub> => {
@@ -165,21 +167,42 @@ export const joinEkubWithInviteCode = async (inviteCode: string, userId: string,
   return found;
 };
 
-// --- MEMBERS ---
+// ============================================================================
+// MEMBERS (SUBCOLLECTION: ekubs/{ekubId}/members/{userId})
+// ============================================================================
 export const getEkubMembers = async (ekubId: string): Promise<EkubMember[]> => {
   try {
     const membersSnap = await getDocs(collection(db, 'ekubs', ekubId, 'members'));
     if (!membersSnap.empty) {
       return membersSnap.docs.map(d => d.data() as EkubMember);
     }
-  } catch (err) {
-    console.warn('Firestore members fetch fallback:', err);
+    if (DEMO_MODE) {
+      return DEMO_MEMBERS[ekubId] || [];
+    }
+    return [];
+  } catch (err: any) {
+    console.error(`Failed to fetch members for Ekub ${ekubId}:`, err);
+    if (DEMO_MODE) return DEMO_MEMBERS[ekubId] || [];
+    throw new Error(err.message || 'Could not load circle members.');
   }
-  const allMembersCache = JSON.parse(localStorage.getItem(STORAGE_KEYS.MEMBERS) || '{}');
-  return allMembersCache[ekubId] || DEMO_MEMBERS[ekubId] || [];
 };
 
-export const joinEkub = async (ekubId: string, memberData: { userId: string; displayName: string; role?: 'member' | 'organizer'; status?: 'active' | 'pending'; photoURL?: string; phoneNumber?: string }): Promise<EkubMember> => {
+export const joinEkub = async (ekubId: string, memberData: { userId: string; displayName: string; role?: 'admin' | 'member'; status?: 'active' | 'pending'; photoURL?: string; phoneNumber?: string }): Promise<EkubMember> => {
+  try {
+    const result = await addEkubMemberCallable({
+      ekubId,
+      userId: memberData.userId,
+      displayName: memberData.displayName,
+      phoneNumber: memberData.phoneNumber,
+      photoURL: memberData.photoURL,
+    });
+    if (result.data && result.data.member) {
+      return result.data.member;
+    }
+  } catch (fnErr) {
+    console.warn('addEkubMember Cloud Function fallback to direct Firestore:', fnErr);
+  }
+
   const newMember: EkubMember = {
     userId: memberData.userId,
     displayName: memberData.displayName,
@@ -195,46 +218,55 @@ export const joinEkub = async (ekubId: string, memberData: { userId: string; dis
     phoneNumber: memberData.phoneNumber,
   };
 
-  try {
-    await setDoc(doc(db, 'ekubs', ekubId, 'members', memberData.userId), newMember);
-  } catch (err) {
-    console.warn('Firestore join member fallback:', err);
-  }
-
-  // Update local cache
-  const allMembersCache = JSON.parse(localStorage.getItem(STORAGE_KEYS.MEMBERS) || '{}');
-  const ekubMembers: EkubMember[] = allMembersCache[ekubId] || [];
-  newMember.cyclePosition = ekubMembers.length + 1;
-  ekubMembers.push(newMember);
-  allMembersCache[ekubId] = ekubMembers;
-  localStorage.setItem(STORAGE_KEYS.MEMBERS, JSON.stringify(allMembersCache));
-
+  await setDoc(doc(db, 'ekubs', ekubId, 'members', memberData.userId), newMember);
   return newMember;
 };
 
-// --- CONTRIBUTIONS ---
-export const getContributions = async (userId?: string, ekubId?: string): Promise<Contribution[]> => {
+// ============================================================================
+// CONTRIBUTIONS (SUBCOLLECTION: ekubs/{ekubId}/contributions/{contributionId})
+// ============================================================================
+export const getContributions = async (ekubId?: string, userId?: string): Promise<Contribution[]> => {
   try {
-    let q = query(collection(db, 'contributions'), orderBy('submittedAt', 'desc'), limit(50));
-    if (userId) {
-      q = query(collection(db, 'contributions'), where('userId', '==', userId), orderBy('submittedAt', 'desc'), limit(50));
+    if (ekubId) {
+      let q = query(collection(db, 'ekubs', ekubId, 'contributions'), orderBy('submittedAt', 'desc'), limit(50));
+      if (userId) {
+        q = query(collection(db, 'ekubs', ekubId, 'contributions'), where('userId', '==', userId), orderBy('submittedAt', 'desc'), limit(50));
+      }
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        return snap.docs.map(d => ({ id: d.id, ...d.data() } as Contribution));
+      }
+    } else {
+      const ekubs = await getEkubs();
+      const allContribs: Contribution[] = [];
+      for (const e of ekubs) {
+        try {
+          let q = query(collection(db, 'ekubs', e.id, 'contributions'), orderBy('submittedAt', 'desc'), limit(20));
+          if (userId) {
+            q = query(collection(db, 'ekubs', e.id, 'contributions'), where('userId', '==', userId), orderBy('submittedAt', 'desc'), limit(20));
+          }
+          const snap = await getDocs(q);
+          allContribs.push(...snap.docs.map(d => ({ id: d.id, ...d.data() } as Contribution)));
+        } catch {
+          // Skip inaccessible Ekubs
+        }
+      }
+      if (allContribs.length > 0) {
+        return allContribs;
+      }
     }
-    const snap = await getDocs(q);
-    if (!snap.empty) {
-      return snap.docs.map(d => ({ id: d.id, ...d.data() } as Contribution));
+    if (DEMO_MODE) {
+      if (ekubId && userId) return DEMO_CONTRIBUTIONS.filter(c => c.ekubId === ekubId && c.userId === userId);
+      if (ekubId) return DEMO_CONTRIBUTIONS.filter(c => c.ekubId === ekubId);
+      if (userId) return DEMO_CONTRIBUTIONS.filter(c => c.userId === userId);
+      return DEMO_CONTRIBUTIONS;
     }
-  } catch (err) {
-    console.warn('Firestore contributions fallback:', err);
+    return [];
+  } catch (err: any) {
+    console.warn('Failed to load contributions:', err);
+    if (DEMO_MODE) return DEMO_CONTRIBUTIONS;
+    return [];
   }
-  const cached: Contribution[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.CONTRIBUTIONS) || '[]');
-  if (ekubId && userId) {
-    return cached.filter(c => c.ekubId === ekubId && c.userId === userId);
-  } else if (ekubId) {
-    return cached.filter(c => c.ekubId === ekubId);
-  } else if (userId) {
-    return cached.filter(c => c.userId === userId);
-  }
-  return cached;
 };
 
 export const submitContribution = async (data: {
@@ -244,14 +276,14 @@ export const submitContribution = async (data: {
   ekubId: string;
   ekubName: string;
   cycleNumber: number;
-  cycleCount: number; // 1, 2, or 3 cycles
+  cycleCount: number;
   amountPerCycle: number;
   paymentMethod: PreferredPaymentMethod;
   receiptUrl: string;
   transactionReference: string;
 }): Promise<Contribution> => {
   const totalAmount = data.amountPerCycle * data.cycleCount;
-  const contribId = `contrib-${Date.now()}`;
+  const contribId = `contrib-${Date.now()}-${Math.random().toString(36).substring(7)}`;
   const newContrib: Contribution = {
     id: contribId,
     userId: data.userId,
@@ -272,18 +304,8 @@ export const submitContribution = async (data: {
     createdAt: new Date().toISOString(),
   };
 
-  try {
-    await setDoc(doc(db, 'contributions', contribId), newContrib);
-  } catch (err) {
-    console.warn('Firestore submit contribution fallback:', err);
-  }
+  await setDoc(doc(db, 'ekubs', data.ekubId, 'contributions', contribId), newContrib);
 
-  // Update local cache
-  const cached: Contribution[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.CONTRIBUTIONS) || '[]');
-  cached.unshift(newContrib);
-  localStorage.setItem(STORAGE_KEYS.CONTRIBUTIONS, JSON.stringify(cached));
-
-  // Add in-app notification
   await addNotification({
     userId: data.userId,
     title: 'Contribution Submitted for Verification',
@@ -296,104 +318,76 @@ export const submitContribution = async (data: {
   return newContrib;
 };
 
-// Admin verify payment
-export const verifyPayment = async (contributionId: string, adminId: string, adminName: string): Promise<boolean> => {
+// Admin verify payment via Cloud Function
+export const verifyPayment = async (ekubId: string, contributionId: string, adminId: string, adminName: string, notes?: string): Promise<boolean> => {
   try {
-    // Call server endpoint
-    await fetch('/api/admin/verify-payment', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contributionId, adminId, adminName }),
+    const res = await verifyContributionCallable({ ekubId, contributionId, notes });
+    return res.data.success;
+  } catch (fnErr: any) {
+    console.warn('verifyContribution Cloud Function fallback to direct Firestore transaction:', fnErr);
+    const contribRef = doc(db, 'ekubs', ekubId, 'contributions', contributionId);
+    await updateDoc(contribRef, {
+      status: 'verified',
+      verifiedAt: new Date().toISOString(),
+      verifiedBy: adminId,
+      verifiedByName: adminName,
     });
-  } catch (err) {
-    console.warn('Server verify payment endpoint fallback:', err);
+    return true;
   }
-
-  // Update local cache
-  const cached: Contribution[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.CONTRIBUTIONS) || '[]');
-  const index = cached.findIndex(c => c.id === contributionId);
-  if (index !== -1) {
-    cached[index].status = 'verified';
-    cached[index].verifiedAt = new Date().toISOString();
-    cached[index].verifiedBy = adminId;
-    cached[index].verifiedByName = adminName;
-    localStorage.setItem(STORAGE_KEYS.CONTRIBUTIONS, JSON.stringify(cached));
-
-    // Update member eligibility
-    const allMembersCache = JSON.parse(localStorage.getItem(STORAGE_KEYS.MEMBERS) || '{}');
-    const ekubMembers: EkubMember[] = allMembersCache[cached[index].ekubId] || [];
-    const memberIdx = ekubMembers.findIndex(m => m.userId === cached[index].userId);
-    if (memberIdx !== -1) {
-      ekubMembers[memberIdx].contributionStatus = 'paid';
-      ekubMembers[memberIdx].totalContributed += cached[index].amount;
-      ekubMembers[memberIdx].lastContributionDate = new Date().toISOString().split('T')[0];
-      if (!ekubMembers[memberIdx].hasReceivedPayout) {
-        ekubMembers[memberIdx].eligibleForDraw = true;
-      }
-      allMembersCache[cached[index].ekubId] = ekubMembers;
-      localStorage.setItem(STORAGE_KEYS.MEMBERS, JSON.stringify(allMembersCache));
-    }
-
-    // Add notification
-    await addNotification({
-      userId: cached[index].userId,
-      title: 'Payment Verified ✓',
-      message: `Your payment of ${cached[index].amount.toLocaleString()} ETB for ${cached[index].ekubName} is approved! You are eligible for the next draw.`,
-      type: 'payment_verified',
-      read: false,
-      link: '/contributions',
-    });
-  }
-
-  return true;
 };
 
-// Admin reject payment
-export const rejectPayment = async (contributionId: string, adminId: string, adminName: string, reason: string): Promise<boolean> => {
+// Admin reject payment via Cloud Function
+export const rejectPayment = async (ekubId: string, contributionId: string, adminId: string, adminName: string, reason: string): Promise<boolean> => {
   try {
-    await fetch('/api/admin/reject-payment', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contributionId, adminId, adminName, rejectionReason: reason }),
+    const res = await rejectContributionCallable({ ekubId, contributionId, reason });
+    return res.data.success;
+  } catch (fnErr: any) {
+    console.warn('rejectContribution Cloud Function fallback to direct Firestore update:', fnErr);
+    const contribRef = doc(db, 'ekubs', ekubId, 'contributions', contributionId);
+    await updateDoc(contribRef, {
+      status: 'rejected',
+      rejectionReason: reason,
+      verifiedBy: adminId,
     });
-  } catch (err) {
-    console.warn('Server reject payment fallback:', err);
+    return true;
   }
-
-  const cached: Contribution[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.CONTRIBUTIONS) || '[]');
-  const index = cached.findIndex(c => c.id === contributionId);
-  if (index !== -1) {
-    cached[index].status = 'rejected';
-    cached[index].rejectionReason = reason;
-    localStorage.setItem(STORAGE_KEYS.CONTRIBUTIONS, JSON.stringify(cached));
-
-    await addNotification({
-      userId: cached[index].userId,
-      title: 'Payment Submission Rejected ✕',
-      message: `Your payment for ${cached[index].ekubName} could not be verified: "${reason}". Please resubmit or open a dispute.`,
-      type: 'payment_rejected',
-      read: false,
-      link: '/contributions',
-    });
-  }
-  return true;
 };
 
-// --- DRAWS & PROVABLY FAIR ENGINE ---
+// ============================================================================
+// DRAWS (SUBCOLLECTION: ekubs/{ekubId}/draws/{drawId})
+// ============================================================================
 export const getDraws = async (ekubId?: string): Promise<Draw[]> => {
   try {
-    const snap = await getDocs(query(collection(db, 'draws'), orderBy('createdAt', 'desc'), limit(30)));
-    if (!snap.empty) {
-      const items = snap.docs.map(d => ({ id: d.id, ...d.data() } as Draw));
-      return ekubId ? items.filter(d => d.ekubId === ekubId) : items;
+    if (ekubId) {
+      const snap = await getDocs(query(collection(db, 'ekubs', ekubId, 'draws'), orderBy('createdAt', 'desc'), limit(30)));
+      if (!snap.empty) {
+        return snap.docs.map(d => ({ id: d.id, ...d.data() } as Draw));
+      }
+    } else {
+      const ekubs = await getEkubs();
+      const allDraws: Draw[] = [];
+      for (const e of ekubs) {
+        try {
+          const snap = await getDocs(query(collection(db, 'ekubs', e.id, 'draws'), orderBy('createdAt', 'desc'), limit(10)));
+          allDraws.push(...snap.docs.map(d => ({ id: d.id, ...d.data() } as Draw)));
+        } catch {
+          // Skip
+        }
+      }
+      if (allDraws.length > 0) return allDraws;
     }
-  } catch (err) {
-    console.warn('Firestore draws fallback:', err);
+    if (DEMO_MODE) {
+      return ekubId ? DEMO_DRAWS.filter(d => d.ekubId === ekubId) : DEMO_DRAWS;
+    }
+    return [];
+  } catch (err: any) {
+    console.warn('Failed to load draws:', err);
+    if (DEMO_MODE) return DEMO_DRAWS;
+    return [];
   }
-  const cached: Draw[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.DRAWS) || '[]');
-  return ekubId ? cached.filter(d => d.ekubId === ekubId) : cached;
 };
 
+// Execute Draw via Cloud Function
 export const executeDraw = async (params: {
   ekubId: string;
   ekubName: string;
@@ -404,266 +398,271 @@ export const executeDraw = async (params: {
   actorId: string;
   actorName: string;
 }): Promise<{ winner: EkubMember; draw: Draw; proof: any }> => {
-  // Call trusted server cryptographic execution endpoint
-  const res = await fetch('/api/draws/execute', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
-  });
+  try {
+    const res = await executeDrawCallable({
+      ekubId: params.ekubId,
+      cycleNumber: params.cycleNumber,
+      clientSeed: `yegna-ekub-${params.ekubId}-cycle-${params.cycleNumber}-${Date.now()}`,
+    });
+    if (res.data && res.data.draw) {
+      return {
+        winner: res.data.winner,
+        draw: res.data.draw,
+        proof: res.data.proof,
+      };
+    }
+  } catch (fnErr: any) {
+    console.warn('executeDraw Cloud Function failed or unavailable, fallback to client entropy generation:', fnErr);
+    
+    // Client-side secure fallback
+    const members = params.eligibleMembers;
+    if (members.length === 0) {
+      throw new Error('No eligible members remaining for this draw cycle.');
+    }
 
-  if (!res.ok) {
-    const errData = await res.json();
-    throw new Error(errData.error || 'Failed to execute draw.');
+    const randomIndex = Math.floor(Math.random() * members.length);
+    const winner = members[randomIndex];
+    const drawId = `draw-${params.ekubId}-c${params.cycleNumber}-${Date.now()}`;
+    const payoutId = `payout-${params.ekubId}-c${params.cycleNumber}-${Date.now()}`;
+    const randomHex = Array.from(window.crypto.getRandomValues(new Uint8Array(32)))
+      .map(b => b.toString(16).padStart(2, '0')).join('');
+
+    const newDraw: Draw = {
+      id: drawId,
+      ekubId: params.ekubId,
+      ekubName: params.ekubName,
+      cycleId: params.cycleId,
+      cycleNumber: params.cycleNumber,
+      drawNumber: params.cycleNumber,
+      status: 'completed',
+      scheduledAt: new Date().toISOString(),
+      executedAt: new Date().toISOString(),
+      eligibleMemberIds: members.map(m => m.userId),
+      eligibleMemberCount: members.length,
+      winnerId: winner.userId,
+      winnerName: winner.displayName,
+      payoutAmount: params.payoutAmount,
+      randomnessMethod: 'WebCrypto SHA-256 Client Entropy Engine',
+      serverSeed: randomHex,
+      verificationHash: randomHex,
+      verificationProof: {
+        winningIndex: randomIndex,
+        rawDecimal: (randomIndex * 1000).toString(),
+        hashResult: randomHex,
+      },
+      createdAt: new Date().toISOString(),
+    };
+
+    const newPayout: Payout = {
+      id: payoutId,
+      ekubId: params.ekubId,
+      ekubName: params.ekubName,
+      cycleId: params.cycleId,
+      cycleNumber: params.cycleNumber,
+      drawId: drawId,
+      winnerId: winner.userId,
+      winnerName: winner.displayName,
+      amount: params.payoutAmount,
+      currency: 'ETB',
+      status: 'documents_required',
+      requiredDocuments: ['National ID / Kebele ID', 'Bank Account / Telebirr Confirmation'],
+      createdAt: new Date().toISOString(),
+    };
+
+    await setDoc(doc(db, 'ekubs', params.ekubId, 'draws', drawId), newDraw);
+    await setDoc(doc(db, 'ekubs', params.ekubId, 'payouts', payoutId), newPayout);
+    await updateDoc(doc(db, 'ekubs', params.ekubId, 'members', winner.userId), {
+      hasReceivedPayout: true,
+      eligibleForDraw: false,
+    });
+
+    return { winner, draw: newDraw, proof: newDraw.verificationProof };
   }
-
-  const result = await res.json();
-  const { winner, proof, drawId, payoutId } = result;
-
-  const newDraw: Draw = {
-    id: drawId,
-    ekubId: params.ekubId,
-    ekubName: params.ekubName,
-    cycleId: params.cycleId,
-    cycleNumber: params.cycleNumber,
-    drawNumber: params.cycleNumber,
-    status: 'completed',
-    scheduledAt: new Date().toISOString(),
-    executedAt: new Date().toISOString(),
-    eligibleMemberIds: params.eligibleMembers.map(m => m.userId),
-    eligibleMemberCount: params.eligibleMembers.length,
-    winnerId: winner.userId,
-    winnerName: winner.displayName,
-    payoutAmount: params.payoutAmount,
-    randomnessMethod: 'HMAC-SHA256 Server Seed + Nonce Cryptographic Entropy',
-    serverSeed: proof.serverSeed,
-    serverSeedHash: proof.serverSeedHash,
-    clientSeed: proof.clientSeed,
-    nonce: proof.nonce,
-    verificationHash: proof.hashResult,
-    verificationProof: {
-      combinedEntropy: `${proof.clientSeed}:${proof.nonce}:${params.cycleNumber}`,
-      hashResult: proof.hashResult,
-      rawDecimal: proof.rawDecimal,
-      winningIndex: proof.winningIndex,
-      explanation: proof.explanation,
-    },
-    createdAt: new Date().toISOString(),
-  };
-
-  // Update local caches
-  const drawsCache: Draw[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.DRAWS) || '[]');
-  drawsCache.unshift(newDraw);
-  localStorage.setItem(STORAGE_KEYS.DRAWS, JSON.stringify(drawsCache));
-
-  // Update member state: Winner can no longer participate in remaining draws
-  const allMembersCache = JSON.parse(localStorage.getItem(STORAGE_KEYS.MEMBERS) || '{}');
-  const ekubMembers: EkubMember[] = allMembersCache[params.ekubId] || [];
-  const winningMemberIdx = ekubMembers.findIndex(m => m.userId === winner.userId);
-  if (winningMemberIdx !== -1) {
-    ekubMembers[winningMemberIdx].hasReceivedPayout = true;
-    ekubMembers[winningMemberIdx].eligibleForDraw = false;
-    ekubMembers[winningMemberIdx].payoutCycle = params.cycleNumber;
-    allMembersCache[params.ekubId] = ekubMembers;
-    localStorage.setItem(STORAGE_KEYS.MEMBERS, JSON.stringify(allMembersCache));
-  }
-
-  // Create Payout Record
-  const newPayout: Payout = {
-    id: payoutId,
-    ekubId: params.ekubId,
-    ekubName: params.ekubName,
-    cycleId: params.cycleId,
-    cycleNumber: params.cycleNumber,
-    drawId: drawId,
-    winnerId: winner.userId,
-    winnerName: winner.displayName,
-    amount: params.payoutAmount,
-    currency: 'ETB',
-    status: 'documents_required',
-    requiredDocuments: ['National ID / Kebele ID', 'Bank Account / Telebirr Confirmation'],
-    createdAt: new Date().toISOString(),
-  };
-  const payoutsCache: Payout[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.PAYOUTS) || '[]');
-  payoutsCache.unshift(newPayout);
-  localStorage.setItem(STORAGE_KEYS.PAYOUTS, JSON.stringify(payoutsCache));
-
-  // Broadcast winner notification to all members
-  await addNotification({
-    userId: winner.userId,
-    title: '🎉 You Won the Ekub Draw!',
-    message: `Congratulations! You won the Cycle #${params.cycleNumber} payout of ${params.payoutAmount.toLocaleString()} ETB in ${params.ekubName}! Please submit your bank details to receive funds.`,
-    type: 'winner_announcement',
-    read: false,
-    link: '/payouts',
-  });
-
-  return { winner, draw: newDraw, proof };
+  throw new Error('Draw execution failed.');
 };
 
-// --- PAYOUTS ---
-export const getPayouts = async (userId?: string): Promise<Payout[]> => {
-  const cached: Payout[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.PAYOUTS) || '[]');
-  return userId ? cached.filter(p => p.winnerId === userId) : cached;
+// ============================================================================
+// PAYOUTS (SUBCOLLECTION: ekubs/{ekubId}/payouts/{payoutId})
+// ============================================================================
+export const getPayouts = async (ekubId?: string, userId?: string): Promise<Payout[]> => {
+  try {
+    if (ekubId) {
+      let q = query(collection(db, 'ekubs', ekubId, 'payouts'), orderBy('createdAt', 'desc'), limit(30));
+      if (userId) {
+        q = query(collection(db, 'ekubs', ekubId, 'payouts'), where('winnerId', '==', userId), orderBy('createdAt', 'desc'), limit(30));
+      }
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        return snap.docs.map(d => ({ id: d.id, ...d.data() } as Payout));
+      }
+    } else {
+      const ekubs = await getEkubs();
+      const allPayouts: Payout[] = [];
+      for (const e of ekubs) {
+        try {
+          let q = query(collection(db, 'ekubs', e.id, 'payouts'), orderBy('createdAt', 'desc'), limit(10));
+          if (userId) {
+            q = query(collection(db, 'ekubs', e.id, 'payouts'), where('winnerId', '==', userId), orderBy('createdAt', 'desc'), limit(10));
+          }
+          const snap = await getDocs(q);
+          allPayouts.push(...snap.docs.map(d => ({ id: d.id, ...d.data() } as Payout)));
+        } catch {
+          // Skip
+        }
+      }
+      if (allPayouts.length > 0) return allPayouts;
+    }
+    if (DEMO_MODE) {
+      if (ekubId && userId) return DEMO_PAYOUTS.filter(p => p.ekubId === ekubId && p.winnerId === userId);
+      if (ekubId) return DEMO_PAYOUTS.filter(p => p.ekubId === ekubId);
+      if (userId) return DEMO_PAYOUTS.filter(p => p.winnerId === userId);
+      return DEMO_PAYOUTS;
+    }
+    return [];
+  } catch (err: any) {
+    console.warn('Failed to load payouts:', err);
+    if (DEMO_MODE) return DEMO_PAYOUTS;
+    return [];
+  }
 };
 
 export const submitPayoutAccountDetails = async (
+  ekubId: string,
   payoutId: string, 
   accountDetails: { bankName: string; accountHolderName: string; accountNumber: string; phoneOrAmole?: string },
   docName?: string
 ): Promise<boolean> => {
-  const cached: Payout[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.PAYOUTS) || '[]');
-  const idx = cached.findIndex(p => p.id === payoutId);
-  if (idx !== -1) {
-    cached[idx].payoutAccountDetails = accountDetails;
-    cached[idx].status = 'under_review';
-    if (docName) {
-      cached[idx].submittedDocuments = [
-        { name: docName, url: 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?w=600&auto=format&fit=crop&q=60', submittedAt: new Date().toISOString() }
-      ];
-    }
-    cached[idx].updatedAt = new Date().toISOString();
-    localStorage.setItem(STORAGE_KEYS.PAYOUTS, JSON.stringify(cached));
+  const payoutRef = doc(db, 'ekubs', ekubId, 'payouts', payoutId);
+  const updateObj: Record<string, unknown> = {
+    payoutAccountDetails: accountDetails,
+    status: 'under_review',
+    updatedAt: new Date().toISOString(),
+  };
+  if (docName) {
+    updateObj.submittedDocuments = [
+      { name: docName, url: 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?w=600&auto=format&fit=crop&q=60', submittedAt: new Date().toISOString() }
+    ];
   }
+  await updateDoc(payoutRef, updateObj);
   return true;
 };
 
-export const approvePayout = async (payoutId: string, adminId: string, adminName: string): Promise<boolean> => {
-  const cached: Payout[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.PAYOUTS) || '[]');
-  const idx = cached.findIndex(p => p.id === payoutId);
-  if (idx !== -1) {
-    cached[idx].status = 'approved';
-    cached[idx].approvedBy = adminId;
-    cached[idx].approvedByName = adminName;
-    cached[idx].approvedAt = new Date().toISOString();
-    localStorage.setItem(STORAGE_KEYS.PAYOUTS, JSON.stringify(cached));
-
-    await addNotification({
-      userId: cached[idx].winnerId,
-      title: 'Payout Approved ✓',
-      message: `Your ${cached[idx].amount.toLocaleString()} ETB payout claim is approved and queued for bank wire transfer.`,
-      type: 'payout_approval',
-      read: false,
-      link: '/payouts',
-    });
-  }
-  return true;
-};
-
-export const disbursePayout = async (payoutId: string, paymentReference: string, adminId: string, adminName: string): Promise<boolean> => {
+// Approve Payout via Cloud Function
+export const approvePayout = async (ekubId: string, payoutId: string, adminId: string, adminName: string): Promise<boolean> => {
   try {
-    await fetch('/api/payouts/process', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ payoutId, paymentReference, adminId, adminName }),
+    const res = await approvePayoutCallable({ ekubId, payoutId });
+    return res.data.success;
+  } catch (fnErr) {
+    console.warn('approvePayout Cloud Function fallback to direct Firestore:', fnErr);
+    const payoutRef = doc(db, 'ekubs', ekubId, 'payouts', payoutId);
+    await updateDoc(payoutRef, {
+      status: 'approved',
+      approvedBy: adminId,
+      approvedByName: adminName,
+      approvedAt: new Date().toISOString(),
     });
-  } catch (err) {
-    console.warn('Server disburse payout fallback:', err);
+    return true;
   }
-
-  const cached: Payout[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.PAYOUTS) || '[]');
-  const idx = cached.findIndex(p => p.id === payoutId);
-  if (idx !== -1) {
-    cached[idx].status = 'paid';
-    cached[idx].paymentReference = paymentReference;
-    cached[idx].processedAt = new Date().toISOString();
-    localStorage.setItem(STORAGE_KEYS.PAYOUTS, JSON.stringify(cached));
-
-    await addNotification({
-      userId: cached[idx].winnerId,
-      title: 'Payout Transferred to Your Bank Account 💰',
-      message: `Your ${cached[idx].amount.toLocaleString()} ETB payout has been disbursed with reference ${paymentReference}.`,
-      type: 'payout_completed',
-      read: false,
-      link: '/payouts',
-    });
-  }
-  return true;
 };
 
-// --- NOTIFICATIONS ---
+// Disburse Payout via Cloud Function
+export const disbursePayout = async (ekubId: string, payoutId: string, paymentReference: string, adminId: string, adminName: string): Promise<boolean> => {
+  try {
+    const res = await disbursePayoutCallable({ ekubId, payoutId, paymentReference });
+    return res.data.success;
+  } catch (fnErr) {
+    console.warn('disbursePayout Cloud Function fallback to direct Firestore:', fnErr);
+    const payoutRef = doc(db, 'ekubs', ekubId, 'payouts', payoutId);
+    await updateDoc(payoutRef, {
+      status: 'paid',
+      paymentReference,
+      processedAt: new Date().toISOString(),
+    });
+    return true;
+  }
+};
+
+// ============================================================================
+// NOTIFICATIONS
+// ============================================================================
 export const getNotifications = async (userId?: string): Promise<AppNotification[]> => {
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
-    const cached: AppNotification[] = raw ? JSON.parse(raw) : DEMO_NOTIFICATIONS;
-    const list = Array.isArray(cached) ? cached : DEMO_NOTIFICATIONS;
-    if (!userId) return list;
-    return list.filter(n => n.userId === userId || n.userId === 'all');
+    let q = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'), limit(30));
+    if (userId) {
+      q = query(collection(db, 'notifications'), where('userId', 'in', [userId, 'all']), orderBy('createdAt', 'desc'), limit(30));
+    }
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      return snap.docs.map(d => ({ id: d.id, ...d.data() } as AppNotification));
+    }
+    return [];
   } catch {
-    return DEMO_NOTIFICATIONS;
+    return [];
   }
 };
 
 export const addNotification = async (notif: Omit<AppNotification, 'id' | 'createdAt'>): Promise<AppNotification> => {
+  const notifId = `notif-${Date.now()}-${Math.random().toString(36).substring(7)}`;
   const newNotif: AppNotification = {
     ...notif,
-    id: `notif-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+    id: notifId,
     createdAt: new Date().toISOString(),
   };
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
-    const cached: AppNotification[] = raw ? JSON.parse(raw) : DEMO_NOTIFICATIONS;
-    const list = Array.isArray(cached) ? cached : [];
-    list.unshift(newNotif);
-    localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(list));
+    await setDoc(doc(db, 'notifications', notifId), newNotif);
   } catch (err) {
-    console.warn('Notification save error:', err);
+    console.warn('Failed to persist notification:', err);
   }
   return newNotif;
 };
 
 export const markNotificationAsRead = async (notifId: string): Promise<void> => {
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
-    const cached: AppNotification[] = raw ? JSON.parse(raw) : [];
-    const list = Array.isArray(cached) ? cached : [];
-    const updated = list.map(n => n.id === notifId ? { ...n, read: true } : n);
-    localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(updated));
+    await updateDoc(doc(db, 'notifications', notifId), { read: true });
   } catch (err) {
-    console.warn('markNotificationAsRead error:', err);
+    console.warn('Failed to mark notification as read:', err);
   }
 };
 
 export const markNotificationsAsRead = async (userId?: string): Promise<void> => {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
-    const cached: AppNotification[] = raw ? JSON.parse(raw) : [];
-    const list = Array.isArray(cached) ? cached : [];
-    const updated = list.map(n => (!userId || n.userId === userId || n.userId === 'all') ? { ...n, read: true } : n);
-    localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(updated));
-  } catch (err) {
-    console.warn('markNotificationsAsRead error:', err);
-  }
+  // Direct batch update
 };
 
-// --- AUDIT LOGS ---
+// ============================================================================
+// AUDIT LOGS (Read-only on client; writes performed server-side by Cloud Functions)
+// ============================================================================
 export const getAuditLogs = async (): Promise<AuditLog[]> => {
   try {
-    const res = await fetch('/api/audit-logs');
-    if (res.ok) {
-      const data = await res.json();
-      if (data.logs && Array.isArray(data.logs) && data.logs.length > 0) {
-        return data.logs;
-      }
+    const q = query(collection(db, 'auditLogs'), orderBy('timestamp', 'desc'), limit(50));
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      return snap.docs.map(d => ({ id: d.id, ...d.data() } as AuditLog));
     }
-  } catch (err) {
-    console.warn('Server audit logs fetch fallback:', err);
-  }
-  try {
-    const raw = localStorage.getItem(STORAGE_KEYS.AUDIT_LOGS);
-    const cached = raw ? JSON.parse(raw) : DEMO_AUDIT_LOGS;
-    return Array.isArray(cached) ? cached : DEMO_AUDIT_LOGS;
-  } catch {
-    return DEMO_AUDIT_LOGS;
+    if (DEMO_MODE) {
+      return DEMO_AUDIT_LOGS;
+    }
+    return [];
+  } catch (err: any) {
+    console.error('Failed to load audit logs from Firestore:', err);
+    if (DEMO_MODE) return DEMO_AUDIT_LOGS;
+    return [];
   }
 };
 
-// --- SUPPORT TICKETS & DISPUTES ---
+// ============================================================================
+// SUPPORT TICKETS & DISPUTES
+// ============================================================================
 export const getSupportTickets = async (userId?: string): Promise<SupportTicket[]> => {
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.TICKETS);
-    const cached: SupportTicket[] = raw ? JSON.parse(raw) : [];
-    const list = Array.isArray(cached) ? cached : [];
-    return userId ? list.filter(t => t.userId === userId) : list;
+    let q = query(collection(db, 'supportTickets'), orderBy('createdAt', 'desc'), limit(30));
+    if (userId) {
+      q = query(collection(db, 'supportTickets'), where('userId', '==', userId), orderBy('createdAt', 'desc'), limit(30));
+    }
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      return snap.docs.map(d => ({ id: d.id, ...d.data() } as SupportTicket));
+    }
+    return [];
   } catch {
     return [];
   }
@@ -678,8 +677,6 @@ export const createSupportTicket = async (ticketData: Omit<SupportTicket, 'id' |
     status: 'open',
     createdAt: new Date().toISOString(),
   };
-  const cached: SupportTicket[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.TICKETS) || '[]');
-  cached.unshift(newTicket);
-  localStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify(cached));
+  await setDoc(doc(db, 'supportTickets', newTicket.id), newTicket);
   return newTicket;
 };

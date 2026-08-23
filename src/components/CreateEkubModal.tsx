@@ -10,12 +10,11 @@ import {
   Lock,
   FileText,
   AlertCircle,
-  ArrowRight,
-  UserCheck
+  ArrowRight
 } from 'lucide-react';
 import { useAuth } from '../firebase/AuthContext';
 import { useTranslation } from '../locales/TranslationContext';
-import { Ekub, EkubFrequency, UserRole } from '../types';
+import { Ekub, EkubFrequency } from '../types';
 import { createEkub } from '../firebase/ekubService';
 
 interface CreateEkubModalProps {
@@ -27,7 +26,7 @@ export const CreateEkubModal: React.FC<CreateEkubModalProps> = ({
   onClose,
   onSuccess,
 }) => {
-  const { userProfile, isAdmin, switchDemoUser } = useAuth();
+  const { userProfile, isAdmin } = useAuth();
   const { t, language } = useTranslation();
 
   const [name, setName] = useState('');
@@ -82,8 +81,10 @@ export const CreateEkubModal: React.FC<CreateEkubModalProps> = ({
         memberLimit,
         payoutAmount,
         totalCycles: memberLimit,
+        adminId: userProfile?.uid || 'user-admin',
+        adminName: userProfile?.fullName || 'Super Admin',
         organizerId: userProfile?.uid || 'user-admin',
-        organizerName: userProfile?.fullName || 'Yared Abegaz',
+        organizerName: userProfile?.fullName || 'Super Admin',
         startDate: today,
         nextContributionDate: nextWeek.split('T')[0],
         nextDrawDate: nextWeek,
@@ -159,35 +160,12 @@ export const CreateEkubModal: React.FC<CreateEkubModalProps> = ({
               <div className="flex items-center justify-between">
                 <div>
                   <p className="font-bold text-gray-900">{userProfile?.fullName || 'Active User'}</p>
-                  <p className="text-[11px] text-gray-500">{userProfile?.email}</p>
+                  <p className="text-[11px] text-gray-500">{userProfile?.email || 'Unauthenticated'}</p>
                 </div>
                 <span className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider bg-gray-200 text-gray-700 rounded-lg">
-                  {userProfile?.role === 'member' ? 'Verified Member' : userProfile?.role || 'Guest'}
+                  {userProfile?.role === 'member' ? 'Member' : userProfile?.role || 'Guest'}
                 </span>
               </div>
-            </div>
-
-            <div className="pt-2">
-              <p className="text-[11px] text-gray-600 mb-3">
-                To test initializing an Ekub circle in this environment, switch to the Super Admin account:
-              </p>
-
-              <button
-                type="button"
-                onClick={() => {
-                  switchDemoUser({
-                    uid: 'demo-user-yared-admin',
-                    fullName: 'Yared Abegaz',
-                    email: 'yared.abegaz@gmail.com',
-                    role: 'admin' as UserRole,
-                    phone: '+251 91 184 9284',
-                  });
-                }}
-                className="w-full py-2.5 px-4 bg-[#7856FF] hover:bg-[#6340FF] text-white text-xs font-bold uppercase tracking-wider rounded-xl transition-all shadow-sm flex items-center justify-center space-x-2"
-              >
-                <UserCheck className="w-4 h-4" />
-                <span>Switch to Admin Persona (Yared Abegaz)</span>
-              </button>
             </div>
           </div>
 

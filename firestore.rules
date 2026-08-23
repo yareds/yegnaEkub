@@ -1,142 +1,116 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Helper functions
+
+    // --- Super Admin & Auth Helpers ---
     function isAuthenticated() {
       return request.auth != null;
     }
-    
+
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
-    
-    function getUserData() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-    }
-    
-    function isAdmin() {
+
+    // Role-Based Access: Super Admin is verified against server-controlled /admins collection, auth claims, or bootstrapped developer email
+    function isSuperAdmin() {
       return isAuthenticated() && (
-        getUserData().role == 'admin' || 
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
         request.auth.token.admin == true ||
         request.auth.token.email == 'yared.abegaz@gmail.com'
       );
     }
 
-    // Users collection
+    // Ekub-scoped Admin verification
+    function isEkubAdmin(ekubId) {
+      return isAuthenticated() && (
+        isSuperAdmin() ||
+        (exists(/databases/$(database)/documents/ekubs/$(ekubId)) &&
+         get(/databases/$(database)/documents/ekubs/$(ekubId)).data.adminId == request.auth.uid)
+      );
+    }
+
+    // --- Global Admins Collection ---
+    match /admins/{adminId} {
+      allow read: if true;
+      allow write: if isSuperAdmin();
+    }
+
+    // --- Users Collection ---
     match /users/{userId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && request.auth.uid == userId;
-      allow update: if isOwner(userId) || isAdmin();
-      allow delete: if isAdmin();
+      allow read: if true;
+      allow create, update: if isAuthenticated();
+      allow delete: if isSuperAdmin();
     }
 
-    // Ekubs collection
+    // --- Ekubs Collection ---
     match /ekubs/{ekubId} {
-      allow read: if isAuthenticated() || resource.data.isPrivate != true;
-      allow create: if isAdmin();
-      allow update: if isAuthenticated() && (
-        resource.data.organizerId == request.auth.uid || 
-        isAdmin()
-      );
-      allow delete: if isAdmin();
-      
-      // Members subcollection
+      // All users (including guests exploring discover/landing) can browse Ekubs
+      allow read: if true;
+      allow create: if isAuthenticated();
+      allow update: if isEkubAdmin(ekubId) || isSuperAdmin();
+      allow delete: if isSuperAdmin();
+
+      // --- Members Subcollection ---
       match /members/{memberId} {
-        allow read: if isAuthenticated();
-        allow write: if isAuthenticated() && (
-          request.auth.uid == memberId || 
-          get(/databases/$(database)/documents/ekubs/$(ekubId)).data.organizerId == request.auth.uid || 
-          isAdmin()
-        );
+        allow read: if true;
+        allow create, update: if isAuthenticated();
+        allow delete: if isEkubAdmin(ekubId) || isSuperAdmin();
       }
 
-      // Cycles subcollection
+      // --- Cycles Subcollection ---
       match /cycles/{cycleId} {
-        allow read: if isAuthenticated();
-        allow write: if isAuthenticated() && (
-          get(/databases/$(database)/documents/ekubs/$(ekubId)).data.organizerId == request.auth.uid || 
-          isAdmin()
-        );
+        allow read: if true;
+        allow write: if isEkubAdmin(ekubId) || isSuperAdmin();
       }
 
-      // Draws subcollection
+      // --- Contributions Subcollection ---
+      match /contributions/{contributionId} {
+        allow read: if true;
+        allow create: if isAuthenticated();
+        allow update: if isEkubAdmin(ekubId) || isSuperAdmin();
+        allow delete: if isSuperAdmin();
+      }
+
+      // --- Draws Subcollection ---
       match /draws/{drawId} {
-        allow read: if isAuthenticated();
-        allow write: if isAdmin();
+        allow read: if true;
+        allow create, update: if isEkubAdmin(ekubId) || isSuperAdmin();
+        allow delete: if isSuperAdmin();
+      }
+
+      // --- Payouts Subcollection ---
+      match /payouts/{payoutId} {
+        allow read: if true;
+        allow create: if isEkubAdmin(ekubId) || isSuperAdmin();
+        allow update: if isEkubAdmin(ekubId) || isSuperAdmin() || (isAuthenticated() && resource.data.winnerId == request.auth.uid);
+        allow delete: if isSuperAdmin();
       }
     }
 
-    // Contributions collection
-    match /contributions/{contributionId} {
-      allow read: if isAuthenticated() && (
-        resource.data.userId == request.auth.uid ||
-        isAdmin()
-      );
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAdmin();
-      allow delete: if isAdmin();
-    }
-
-    // Payments collection
-    match /payments/{paymentId} {
-      allow read: if isAuthenticated() && (
-        resource.data.userId == request.auth.uid || 
-        isAdmin()
-      );
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAdmin();
-      allow delete: if isAdmin();
-    }
-
-    // Draws collection
-    match /draws/{drawId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
-    }
-
-    // Payouts collection
-    match /payouts/{payoutId} {
-      allow read: if isAuthenticated() && (
-        resource.data.winnerId == request.auth.uid || 
-        isAdmin()
-      );
-      allow create: if isAdmin();
-      allow update: if isAdmin() || (
-        isAuthenticated() && 
-        resource.data.winnerId == request.auth.uid && 
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['submittedDocuments', 'payoutAccountDetails', 'updatedAt'])
-      );
-      allow delete: if isAdmin();
-    }
-
-    // Notifications collection
+    // --- Notifications Collection ---
     match /notifications/{notificationId} {
-      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || resource.data.userId == 'all');
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
-      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
-    }
-
-    // Audit logs collection (immutable by clients)
-    match /auditLogs/{logId} {
-      allow read: if isAdmin();
-      allow create: if isAuthenticated();
-      allow update, delete: if false; // Append-only audit logs
-    }
-
-    // Support tickets
-    match /supportTickets/{ticketId} {
-      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow delete: if isAdmin();
-    }
-
-    // System settings
-    match /settings/{settingId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow create, update, delete: if isAuthenticated();
+    }
+
+    // --- Audit Logs Collection ---
+    match /auditLogs/{logId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if false;
+    }
+
+    // --- Support Tickets Collection ---
+    match /supportTickets/{ticketId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if isSuperAdmin();
+    }
+
+    // --- System Settings Collection ---
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isSuperAdmin();
     }
   }
 }

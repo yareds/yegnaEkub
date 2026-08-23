@@ -1,0 +1,100 @@
+{
+  "entities": {
+    "Ekub": {
+      "title": "Ekub",
+      "description": "Represents an Ekub rotating savings and credit circle.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "adminId": { "type": "string" },
+        "adminName": { "type": "string" },
+        "amount": { "type": "number" },
+        "frequency": { "type": "string" },
+        "currentCycle": { "type": "number" },
+        "totalCycles": { "type": "number" },
+        "memberLimit": { "type": "number" },
+        "currentMemberCount": { "type": "number" },
+        "payoutAmount": { "type": "number" },
+        "nextDrawDate": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "adminId", "amount", "frequency", "totalCycles", "payoutAmount"]
+    },
+    "Contribution": {
+      "title": "Contribution",
+      "description": "A payment submission by a member for a cycle.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "ekubId": { "type": "string" },
+        "ekubName": { "type": "string" },
+        "cycleNumber": { "type": "number" },
+        "amount": { "type": "number" },
+        "paymentMethod": { "type": "string" },
+        "receiptUrl": { "type": "string" },
+        "transactionReference": { "type": "string" },
+        "status": { "type": "string" },
+        "submittedAt": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "ekubId", "amount", "status", "submittedAt"]
+    },
+    "Draw": {
+      "title": "Draw",
+      "description": "A cryptographic lottery draw for a cycle.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ekubId": { "type": "string" },
+        "cycleNumber": { "type": "number" },
+        "winnerId": { "type": "string" },
+        "winnerName": { "type": "string" },
+        "payoutAmount": { "type": "number" },
+        "status": { "type": "string" },
+        "executedAt": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "ekubId", "cycleNumber", "winnerId", "payoutAmount", "status"]
+    },
+    "Payout": {
+      "title": "Payout",
+      "description": "Winner payout disbursement record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ekubId": { "type": "string" },
+        "cycleNumber": { "type": "number" },
+        "winnerId": { "type": "string" },
+        "winnerName": { "type": "string" },
+        "amount": { "type": "number" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "ekubId", "cycleNumber", "winnerId", "amount", "status"]
+    }
+  },
+  "firestore": {
+    "/ekubs/{ekubId}": {
+      "schema": "Ekub",
+      "description": "Public and private Ekub circles"
+    },
+    "/ekubs/{ekubId}/contributions/{contributionId}": {
+      "schema": "Contribution",
+      "description": "Member cycle contribution slips"
+    },
+    "/ekubs/{ekubId}/draws/{drawId}": {
+      "schema": "Draw",
+      "description": "Cryptographic draw results"
+    },
+    "/ekubs/{ekubId}/payouts/{payoutId}": {
+      "schema": "Payout",
+      "description": "Winner payout pipeline"
+    }
+  }
+}
