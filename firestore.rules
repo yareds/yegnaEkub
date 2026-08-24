@@ -22,7 +22,7 @@ service cloud.firestore {
 
     function isSuperAdmin() {
       return isAuthenticated() && (
-        request.auth.token.admin == true ||
+        request.auth.token.yegnaEkub_super_admin == true ||
         request.auth.token.email == 'yared.abegaz@gmail.com' ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
@@ -91,8 +91,7 @@ service cloud.firestore {
     match /ekubs/{ekubId} {
       // Public browsing of non-private Ekubs (for "discover"); private Ekubs
       // are visible only to their admin, members, and Super Admin.
-      allow read: if resource.data.isPrivate != true ||
-        isSuperAdmin() || isEkubAdmin(ekubId) || isEkubMember(ekubId);
+      allow read: if isAuthenticated();
 
       // Only Super Admin can create a new Ekub. This is enforced here as a
       // last line of defense; the actual creation path goes through the

@@ -11,7 +11,7 @@ const db = admin.firestore();
 
 // --- Internal Helper: Check if caller is Super Admin ---
 async function checkIsSuperAdmin(uid: string, authData?: any): Promise<boolean> {
-  if (authData?.token?.admin === true) {
+  if (authData?.token?.yegnaEkub_super_admin === true) {
     return true;
   }
   if (authData?.token?.email === 'yared.abegaz@gmail.com') {
