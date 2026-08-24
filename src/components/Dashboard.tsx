@@ -62,6 +62,48 @@ export const Dashboard: React.FC<DashboardProps> = ({
     .filter(c => c.status === 'verified')
     .reduce((sum, c) => sum + (c.amount || 0), 0);
 
+  // Real recent-activity feed, derived from the actual contributions/draws/
+  // payouts already loaded for this user -- replaces a previous version of
+  // this section that was entirely static placeholder text.
+  type ActivityItem = { title: string; detail: string; timestamp: string };
+  const recentActivity: ActivityItem[] = [
+    ...userContributions
+      .filter(c => c.status === 'verified' && c.verifiedAt)
+      .map(c => ({
+        title: 'Payment Verified',
+        detail: `You contributed ${c.amount.toLocaleString()} ${c.currency} via ${c.paymentMethod}`,
+        timestamp: c.verifiedAt as string,
+      })),
+    ...(draws || [])
+      .filter(d => d.status === 'completed' && d.executedAt && d.winnerName)
+      .map(d => ({
+        title: 'Draw Completed',
+        detail: `Winner: ${d.winnerName} (${d.payoutAmount.toLocaleString()} ETB)`,
+        timestamp: d.executedAt as string,
+      })),
+    ...(payouts || [])
+      .filter(p => p.status === 'paid')
+      .map(p => ({
+        title: 'Payout Processed',
+        detail: `Recipient: ${p.winnerName} (${p.amount.toLocaleString()} ETB)`,
+        timestamp: (p as { updatedAt?: string }).updatedAt || '',
+      })),
+  ]
+    .filter(item => item.timestamp)
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    .slice(0, 4);
+
+  const formatRelativeTime = (iso: string): string => {
+    const diffMs = Date.now() - new Date(iso).getTime();
+    const diffHrs = diffMs / (1000 * 60 * 60);
+    if (diffHrs < 1) return 'Just now';
+    if (diffHrs < 24) return `${Math.floor(diffHrs)} hours ago`;
+    const diffDays = Math.floor(diffHrs / 24);
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 7) return `${diffDays} days ago`;
+    return new Date(iso).toLocaleDateString();
+  };
+
   return (
     <div className="space-y-6 pb-16">
       
@@ -77,7 +119,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <span>{userProfile?.role === 'admin' ? 'SUPER ADMIN VERIFIED' : 'VERIFIED MEMBER'}</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
-              {language === 'am' ? `እንኳን ደህና መጡ፣ ${userProfile?.fullName}` : `Welcome back, ${userProfile?.fullName}`}
+              {language === 'am' ? `እንኳን ደህና መጡ፣ ${userProfile?.fullName || ''}` : `Welcome back, ${userProfile?.fullName || 'Member'}`}
             </h1>
             <p className="text-xs text-white/70 mt-1 max-w-xl">
               {language === 'am'
@@ -166,7 +208,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <div>
                 <p className="text-xs text-gray-500 uppercase tracking-wider">{t.totalContributed || 'Total Contributed'}</p>
                 <p className="text-2xl font-bold text-[#1C1132] mt-0.5">
-                  {totalUserContributed > 0 ? totalUserContributed.toLocaleString() : '25,000'}{' '}
+                  {totalUserContributed.toLocaleString()}{' '}
                   <span className="text-sm font-bold text-gray-600">ETB</span>
                 </p>
               </div>
@@ -174,7 +216,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <div>
                 <p className="text-xs text-gray-500 uppercase tracking-wider">{t.currentPot}</p>
                 <p className="text-2xl font-bold text-[#7856FF] mt-0.5">
-                  {activeEkub ? activeEkub.payoutAmount.toLocaleString() : '50,000'}{' '}
+                  {activeEkub ? activeEkub.payoutAmount.toLocaleString() : '0'}{' '}
                   <span className="text-sm font-bold text-gray-400">ETB</span>
                 </p>
               </div>
@@ -365,29 +407,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
 
             <div className="space-y-4">
-              <div className="border-l-2 border-[#7856FF] pl-3 py-1">
-                <p className="text-xs font-bold text-gray-900">Payment Verified</p>
-                <p className="text-[10px] text-gray-500">You contributed 5,000 ETB via CBE</p>
-                <p className="text-[9px] text-gray-400 uppercase tracking-wider mt-0.5">2 hours ago</p>
-              </div>
-
-              <div className="border-l-2 border-gray-200 pl-3 py-1">
-                <p className="text-xs font-bold text-gray-900">Draw Completed</p>
-                <p className="text-[10px] text-gray-500">Winner: Dawit K. (50,000 ETB)</p>
-                <p className="text-[9px] text-gray-400 uppercase tracking-wider mt-0.5">Last Friday</p>
-              </div>
-
-              <div className="border-l-2 border-gray-200 pl-3 py-1">
-                <p className="text-xs font-bold text-gray-900">Payout Processed</p>
-                <p className="text-[10px] text-gray-500">Recipient: Sara T. (Wire Disbursed)</p>
-                <p className="text-[9px] text-gray-400 uppercase tracking-wider mt-0.5">Sep 12, 2024</p>
-              </div>
-
-              <div className="border-l-2 border-gray-200 pl-3 py-1">
-                <p className="text-xs font-bold text-gray-900">New Member Joined</p>
-                <p className="text-[10px] text-gray-500">Zenebech H. joined Addis Community Alpha</p>
-                <p className="text-[9px] text-gray-400 uppercase tracking-wider mt-0.5">Sep 10, 2024</p>
-              </div>
+              {recentActivity.length > 0 ? (
+                recentActivity.map((item, idx) => (
+                  <div
+                    key={idx}
+                    className={`border-l-2 ${idx === 0 ? 'border-[#7856FF]' : 'border-gray-200'} pl-3 py-1`}
+                  >
+                    <p className="text-xs font-bold text-gray-900">{item.title}</p>
+                    <p className="text-[10px] text-gray-500">{item.detail}</p>
+                    <p className="text-[9px] text-gray-400 uppercase tracking-wider mt-0.5">
+                      {formatRelativeTime(item.timestamp)}
+                    </p>
+                  </div>
+                ))
+              ) : (
+                <p className="text-xs text-gray-400 py-4 text-center">
+                  {language === 'am' ? 'እስካሁን ምንም እንቅስቃሴ የለም።' : 'No activity yet. Join or start an Ekub to get going.'}
+                </p>
+              )}
             </div>
 
             <div className="mt-5 pt-4 border-t border-gray-100 flex items-center justify-between">

@@ -20,24 +20,27 @@ import { CreateEkubModal } from './components/CreateEkubModal';
 import { JoinEkubModal } from './components/JoinEkubModal';
 import { LegalModal } from './components/LegalModal';
 import { NotificationsModal } from './components/NotificationsModal';
-import { 
-  getEkubs, 
-  getContributions, 
-  getDraws, 
-  getPayouts, 
-  getNotifications, 
+import {
+  getEkubs,
+  getContributions,
+  getDraws,
+  getPayouts,
+  getNotifications,
   getSupportTickets,
-  markNotificationsAsRead 
+  markNotificationsAsRead
 } from './firebase/ekubService';
+import { SignInModal } from './components/SignInModal';
+import { YegnaEkubLogo } from './components/YegnaEkubLogo';
 import { Ekub, Contribution, Draw, Payout, AppNotification, SupportTicket } from './types';
 
 function MainAppContent() {
-  const { userProfile, isSuperAdmin } = useAuth();
+  const { userProfile, isSuperAdmin, user, loading: authLoading } = useAuth();
   const { t, language } = useTranslation();
 
   // Navigation State
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [selectedEkub, setSelectedEkub] = useState<Ekub | null>(null);
+  const [showSignIn, setShowSignIn] = useState(false);
 
   // Domain Datasets
   const [ekubs, setEkubs] = useState<Ekub[]>([]);
@@ -46,7 +49,7 @@ function MainAppContent() {
   const [payouts, setPayouts] = useState<Payout[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(true);
 
   // Role verification: is the user a Super Admin or the designated admin of at least one Ekub?
   const isEkubAdminOfAny = Boolean(userProfile?.uid && ekubs.some(e => e.adminId === userProfile.uid));
@@ -64,10 +67,10 @@ function MainAppContent() {
 
   // Redirect guard: if on admin tab but lack authorization, redirect to dashboard
   useEffect(() => {
-    if (!loading && activeTab === 'admin' && !hasAdminAccess) {
+    if (!dataLoading && activeTab === 'admin' && !hasAdminAccess) {
       setActiveTab('dashboard');
     }
-  }, [activeTab, loading, hasAdminAccess]);
+  }, [activeTab, dataLoading, hasAdminAccess]);
 
   const refreshAllData = async () => {
     try {
@@ -91,13 +94,17 @@ function MainAppContent() {
     } catch (err) {
       console.error('Error loading data:', err);
     } finally {
-      setLoading(false);
+      setDataLoading(false);
     }
   };
 
   useEffect(() => {
-    refreshAllData();
-  }, [userProfile?.uid]);
+    if (user) {
+      refreshAllData();
+    } else {
+      setDataLoading(false);
+    }
+  }, [userProfile?.uid, user]);
 
   const handleNavigate = (tab: string) => {
     setSelectedEkub(null);
@@ -114,6 +121,55 @@ function MainAppContent() {
     await markNotificationsAsRead(userProfile?.uid);
     setNotifications(prev => (prev || []).map(n => ({ ...n, read: true })));
   };
+
+  // Auth gate: while Firebase Auth is still determining session state, show
+  // a plain spinner rather than any app content (signed in or not).
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-[#F8F7FC] flex items-center justify-center">
+        <div className="w-10 h-10 border-3 border-[#7856FF] border-t-transparent animate-spin rounded-full" />
+      </div>
+    );
+  }
+
+  // Auth gate: nobody is signed in. Show the public landing page and a
+  // lightweight header with a real Sign In entry point -- never the
+  // authenticated dashboard, and never a fabricated "signed in" display.
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-[#F8F7FC] text-gray-900 flex flex-col font-sans">
+        <header className="sticky top-0 z-40 h-16 bg-[#1C1132] text-white border-b-2 border-[#7856FF]/30 shadow-md">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-full flex items-center justify-between">
+            <YegnaEkubLogo
+              variant="full"
+              size="sm"
+              theme="dark"
+              showSubtext={true}
+              subtextText={language === 'am' ? 'ዲጂታል ዕቁብ' : 'DIGITAL ROSCA'}
+            />
+            <button
+              onClick={() => setShowSignIn(true)}
+              className="px-4 py-2 bg-[#7856FF] hover:bg-[#6340FF] text-white text-xs font-bold uppercase tracking-widest rounded-lg transition-colors"
+            >
+              {t.signIn}
+            </button>
+          </div>
+        </header>
+
+        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-20">
+          <LandingPage
+            onStartEkub={() => setShowSignIn(true)}
+            onJoinEkub={() => setShowSignIn(true)}
+            onExploreEkubs={() => setShowSignIn(true)}
+            onOpenLegal={() => setShowLegal(true)}
+          />
+        </main>
+
+        {showSignIn && <SignInModal onClose={() => setShowSignIn(false)} />}
+        {showLegal && <LegalModal onClose={() => setShowLegal(false)} />}
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#F8F7FC] text-gray-900 flex flex-col font-sans selection:bg-[#7856FF]/20 selection:text-[#7856FF]">
@@ -132,7 +188,7 @@ function MainAppContent() {
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-20 md:pb-12">
-        {loading ? (
+        {dataLoading ? (
           <div className="flex flex-col items-center justify-center py-24 space-y-4">
             <div className="w-10 h-10 border-3 border-[#7856FF] border-t-transparent animate-spin rounded-full" />
             <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#7856FF]">

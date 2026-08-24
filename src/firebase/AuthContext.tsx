@@ -72,14 +72,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           fullName: firebaseUser.displayName || extraData?.fullName || 'Yegna Member',
           email: firebaseUser.email || '',
           phoneNumber: extraData?.phoneNumber || '+251 91 123 4567',
-          photoURL: firebaseUser.photoURL || undefined,
+          photoURL: firebaseUser.photoURL || '',
           role: isDesignatedAdmin ? 'super_admin' : 'member',
           preferredLanguage: 'en',
           preferredPaymentMethod: 'telebirr',
           verificationStatus: 'verified',
           createdAt: new Date().toISOString(),
-          ...extraData,
         };
+        if (extraData?.phoneNumber) newProfile.phoneNumber = extraData.phoneNumber;
+        if (extraData?.fullName) newProfile.fullName = extraData.fullName;
         await setDoc(userRef, newProfile);
         setUserProfile(newProfile);
         return newProfile;

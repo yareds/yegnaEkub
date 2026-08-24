@@ -208,10 +208,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </div>
                 <div className="hidden sm:flex flex-col items-end text-right">
                   <span className="text-xs text-white/80 font-medium truncate max-w-[110px]">
-                    {userProfile?.fullName || 'Yared A.'}
+                    {userProfile?.fullName || 'Member'}
                   </span>
                   <span className="text-[9px] text-[#C4B5FD] font-bold tracking-wider uppercase">
-                    {userProfile?.role === 'admin' ? 'Super Admin' : 'Verified Member'}
+                    {isAdmin ? 'Super Admin' : 'Verified Member'}
                   </span>
                 </div>
                 <ChevronDown className="w-3.5 h-3.5 text-white/60" />
@@ -228,7 +228,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <p className="font-bold text-gray-900 text-sm mt-0.5">{userProfile?.fullName}</p>
                     <p className="text-xs text-gray-600 truncate">{userProfile?.email}</p>
                     <span className="inline-block mt-1 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-sm bg-[#7856FF]/15 text-[#7856FF] border border-[#7856FF]/30">
-                      {userProfile?.role === 'admin' ? 'Super Admin' : 'Verified Member'}
+                      {isAdmin ? 'Super Admin' : 'Verified Member'}
                     </span>
                   </div>
 
