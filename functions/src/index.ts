@@ -413,7 +413,14 @@ export const rejectContribution = functions.https.onCall(async (data, context) =
 
 // ============================================================================
 // 5. EXECUTE DRAW (Super Admin or Ekub Admin)
-// Server loads eligible members, generates server entropy, writes draw + payout
+// Server loads eligible members, generates server entropy, writes draw +
+// payout, and advances the cycle -- all inside one transaction so that two
+// concurrent calls (two admins, or a double-click) cannot both succeed for
+// the same cycle. The draw/payout document IDs are deterministic
+// (ekubId + cycleNumber, not a timestamp), so the idempotency check below
+// is meaningful: a retried/duplicate call targeting the same cycle will
+// find the draw doc already exists and be rejected, rather than silently
+// creating a second draw and a second payout for the same cycle.
 // ============================================================================
 export const executeDraw = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
@@ -425,113 +432,127 @@ export const executeDraw = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError('invalid-argument', 'ekubId is required.');
   }
 
-  const { isSuper, ekubDoc } = await checkIsEkubAdminOrSuperAdmin(context.auth.uid, ekubId, context.auth);
-  const ekubData = ekubDoc.data()!;
+  const { isSuper } = await checkIsEkubAdminOrSuperAdmin(context.auth.uid, ekubId, context.auth);
 
-  // Load eligible members directly from Firestore
-  const membersSnap = await db.collection('ekubs').doc(ekubId).collection('members').get();
-  if (membersSnap.empty) {
-    throw new functions.https.HttpsError('failed-precondition', 'No members found in this Ekub.');
-  }
-
-  const allMembers = membersSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
-  
-  // Eligible members: have not yet received a payout, and paid for current cycle
-  let eligibleMembers = allMembers.filter(m => !m.hasReceivedPayout && (m.eligibleForDraw || m.contributionStatus === 'paid'));
-  if (eligibleMembers.length === 0) {
-    eligibleMembers = allMembers.filter(m => !m.hasReceivedPayout);
-  }
-
-  if (eligibleMembers.length === 0) {
-    throw new functions.https.HttpsError('failed-precondition', 'All members have already won their payout cycles.');
-  }
-
-  const cycleNumber = ekubData.currentCycle || 1;
-  const payoutAmount = ekubData.payoutAmount || (ekubData.contributionAmount * ekubData.memberLimit);
-
-  // Cryptographically secure randomness generation
-  const serverSeed = crypto.randomBytes(32).toString('hex');
-  const serverSeedHash = crypto.createHash('sha256').update(serverSeed).digest('hex');
-  const clientSeed = providedClientSeed || `yegna-ekub-${ekubId}-cycle-${cycleNumber}-${Date.now()}`;
-  const nonce = Math.floor(Math.random() * 1000000);
-
-  const hmac = crypto.createHmac('sha256', serverSeed);
-  hmac.update(`${clientSeed}:${nonce}:${cycleNumber}`);
-  const hashResult = hmac.digest('hex');
-
-  // Convert first 12 hex characters (48 bits) to integer
-  const hexSlice = hashResult.substring(0, 12);
-  const rawDecimal = parseInt(hexSlice, 16);
-  const winningIndex = rawDecimal % eligibleMembers.length;
-  const winner = eligibleMembers[winningIndex];
-
-  const drawId = `draw-${ekubId}-c${cycleNumber}-${Date.now()}`;
-  const payoutId = `payout-${ekubId}-c${cycleNumber}-${Date.now()}`;
-
-  const proof = {
-    drawId,
-    ekubId,
-    ekubName: ekubData.name,
-    cycleId: `cycle-${cycleNumber}`,
-    cycleNumber,
-    serverSeed,
-    serverSeedHash,
-    clientSeed,
-    nonce,
-    hashResult,
-    rawDecimal: rawDecimal.toString(),
-    eligibleCount: eligibleMembers.length,
-    winningIndex,
-    winnerId: winner.userId || winner.id,
-    winnerName: winner.displayName || winner.name || 'Anonymous Member',
-    payoutAmount,
-    explanation: `Index calculated by (parseInt(HMAC_SHA256(serverSeed, "${clientSeed}:${nonce}:${cycleNumber}")[0..12], 16) % ${eligibleMembers.length}) = ${winningIndex}`,
-    timestamp: new Date().toISOString(),
-  };
-
-  const newDraw = {
-    id: drawId,
-    ekubId,
-    ekubName: ekubData.name,
-    cycleId: `cycle-${cycleNumber}`,
-    cycleNumber,
-    winnerId: winner.userId || winner.id,
-    winnerName: winner.displayName || winner.name,
-    payoutAmount,
-    drawnAt: new Date().toISOString(),
-    serverSeed,
-    serverSeedHash,
-    clientSeed,
-    nonce,
-    verificationHash: hashResult,
-    eligibleMemberCount: eligibleMembers.length,
-    verificationProof: proof,
-    status: 'completed',
-    createdAt: new Date().toISOString(),
-  };
-
-  const newPayout = {
-    id: payoutId,
-    ekubId,
-    ekubName: ekubData.name,
-    cycleId: `cycle-${cycleNumber}`,
-    cycleNumber,
-    drawId,
-    winnerId: winner.userId || winner.id,
-    winnerName: winner.displayName || winner.name,
-    amount: payoutAmount,
-    currency: 'ETB',
-    status: 'documents_required',
-    requiredDocuments: ['National ID / Kebele ID', 'Bank Account / Telebirr Confirmation'],
-    createdAt: new Date().toISOString(),
-  };
-
-  // Transactionally write draw, payout, update member & advance cycle
-  await db.runTransaction(async (transaction) => {
-    const drawRef = db.collection('ekubs').doc(ekubId).collection('draws').doc(drawId);
-    const payoutRef = db.collection('ekubs').doc(ekubId).collection('payouts').doc(payoutId);
-    const winnerMemberRef = db.collection('ekubs').doc(ekubId).collection('members').doc(winner.userId || winner.id);
+  const result = await db.runTransaction(async (transaction) => {
     const ekubRef = db.collection('ekubs').doc(ekubId);
+    const ekubSnap = await transaction.get(ekubRef);
+    if (!ekubSnap.exists) {
+      throw new functions.https.HttpsError('not-found', `Ekub ${ekubId} not found.`);
+    }
+    const ekubData = ekubSnap.data()!;
+    const cycleNumber = ekubData.currentCycle || 1;
+
+    // Deterministic IDs -- the idempotency guard below relies on this.
+    const drawId = `draw-${ekubId}-cycle-${cycleNumber}`;
+    const payoutId = `payout-${ekubId}-cycle-${cycleNumber}`;
+    const drawRef = ekubRef.collection('draws').doc(drawId);
+
+    // Duplicate-draw guard: refuse if this cycle has already been drawn,
+    // instead of silently creating a second draw/payout for it.
+    const existingDraw = await transaction.get(drawRef);
+    if (existingDraw.exists) {
+      throw new functions.https.HttpsError(
+        'already-exists',
+        `Cycle ${cycleNumber} has already been drawn for this Ekub.`
+      );
+    }
+
+    const membersSnap = await transaction.get(ekubRef.collection('members'));
+    if (membersSnap.empty) {
+      throw new functions.https.HttpsError('failed-precondition', 'No members found in this Ekub.');
+    }
+
+    const allMembers = membersSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+
+    // Eligible members: have not yet received a payout, and paid for current cycle
+    let eligibleMembers = allMembers.filter(m => !m.hasReceivedPayout && (m.eligibleForDraw || m.contributionStatus === 'paid'));
+    if (eligibleMembers.length === 0) {
+      eligibleMembers = allMembers.filter(m => !m.hasReceivedPayout);
+    }
+
+    if (eligibleMembers.length === 0) {
+      throw new functions.https.HttpsError('failed-precondition', 'All members have already won their payout cycles.');
+    }
+
+    const payoutAmount = ekubData.payoutAmount || (ekubData.contributionAmount * ekubData.memberLimit);
+
+    // Cryptographically secure randomness generation
+    const serverSeed = crypto.randomBytes(32).toString('hex');
+    const serverSeedHash = crypto.createHash('sha256').update(serverSeed).digest('hex');
+    const clientSeed = providedClientSeed || `yegna-ekub-${ekubId}-cycle-${cycleNumber}-${Date.now()}`;
+    const nonce = Math.floor(Math.random() * 1000000);
+
+    const hmac = crypto.createHmac('sha256', serverSeed);
+    hmac.update(`${clientSeed}:${nonce}:${cycleNumber}`);
+    const hashResult = hmac.digest('hex');
+
+    // Convert first 12 hex characters (48 bits) to integer
+    const hexSlice = hashResult.substring(0, 12);
+    const rawDecimal = parseInt(hexSlice, 16);
+    const winningIndex = rawDecimal % eligibleMembers.length;
+    const winner = eligibleMembers[winningIndex];
+
+    const proof = {
+      drawId,
+      ekubId,
+      ekubName: ekubData.name,
+      cycleId: `cycle-${cycleNumber}`,
+      cycleNumber,
+      serverSeed,
+      serverSeedHash,
+      clientSeed,
+      nonce,
+      hashResult,
+      rawDecimal: rawDecimal.toString(),
+      eligibleCount: eligibleMembers.length,
+      winningIndex,
+      winnerId: winner.userId || winner.id,
+      winnerName: winner.displayName || winner.name || 'Anonymous Member',
+      payoutAmount,
+      explanation: `Index calculated by (parseInt(HMAC_SHA256(serverSeed, "${clientSeed}:${nonce}:${cycleNumber}")[0..12], 16) % ${eligibleMembers.length}) = ${winningIndex}`,
+      timestamp: new Date().toISOString(),
+    };
+
+    const newDraw = {
+      id: drawId,
+      ekubId,
+      ekubName: ekubData.name,
+      cycleId: `cycle-${cycleNumber}`,
+      cycleNumber,
+      winnerId: winner.userId || winner.id,
+      winnerName: winner.displayName || winner.name,
+      payoutAmount,
+      drawnAt: new Date().toISOString(),
+      serverSeed,
+      serverSeedHash,
+      clientSeed,
+      nonce,
+      verificationHash: hashResult,
+      eligibleMemberCount: eligibleMembers.length,
+      verificationProof: proof,
+      status: 'completed',
+      createdAt: new Date().toISOString(),
+    };
+
+    const newPayout = {
+      id: payoutId,
+      ekubId,
+      ekubName: ekubData.name,
+      cycleId: `cycle-${cycleNumber}`,
+      cycleNumber,
+      drawId,
+      winnerId: winner.userId || winner.id,
+      winnerName: winner.displayName || winner.name,
+      amount: payoutAmount,
+      currency: 'ETB',
+      status: 'documents_required',
+      requiredDocuments: ['National ID / Kebele ID', 'Bank Account / Telebirr Confirmation'],
+      createdAt: new Date().toISOString(),
+    };
+
+    const payoutRef = ekubRef.collection('payouts').doc(payoutId);
+    const winnerMemberRef = ekubRef.collection('members').doc(winner.userId || winner.id);
 
     transaction.set(drawRef, newDraw);
     transaction.set(payoutRef, newPayout);
@@ -539,9 +560,14 @@ export const executeDraw = functions.https.onCall(async (data, context) => {
       hasReceivedPayout: true,
       eligibleForDraw: false,
     });
+    // Advance the cycle so a subsequent draw call targets a new,
+    // not-yet-drawn cycle number instead of colliding with this one.
     transaction.update(ekubRef, {
       lastDrawDate: new Date().toISOString(),
+      currentCycle: cycleNumber + 1,
     });
+
+    return { newDraw, newPayout, winner, proof, cycleNumber };
   });
 
   await writeAuditLog({
@@ -550,18 +576,18 @@ export const executeDraw = functions.https.onCall(async (data, context) => {
     actorRole: isSuper ? 'super_admin' : 'admin',
     action: 'DRAW_EXECUTED',
     entityType: 'draw',
-    entityId: drawId,
+    entityId: result.newDraw.id,
     ekubId,
-    reason: `Cryptographic live draw executed for ${ekubData.name} Cycle #${cycleNumber}. Winner: ${winner.displayName}`,
-    newState: { winnerId: winner.userId || winner.id, winningIndex, hashResult },
+    reason: `Cryptographic live draw executed for ${result.newDraw.ekubName} Cycle #${result.cycleNumber}. Winner: ${result.winner.displayName}`,
+    newState: { winnerId: result.winner.userId || result.winner.id, winningIndex: result.proof.winningIndex, hashResult: result.proof.hashResult },
   });
 
   return {
     success: true,
-    draw: newDraw,
-    payout: newPayout,
-    winner,
-    proof,
+    draw: result.newDraw,
+    payout: result.newPayout,
+    winner: result.winner,
+    proof: result.proof,
   };
 });
 
@@ -581,17 +607,29 @@ export const approvePayout = functions.https.onCall(async (data, context) => {
   const { isSuper } = await checkIsEkubAdminOrSuperAdmin(context.auth.uid, ekubId, context.auth);
 
   const payoutRef = db.collection('ekubs').doc(ekubId).collection('payouts').doc(payoutId);
-  const payoutDoc = await payoutRef.get();
-  if (!payoutDoc.exists) {
-    throw new functions.https.HttpsError('not-found', `Payout ${payoutId} not found.`);
-  }
 
-  const payoutData = payoutDoc.data()!;
-
-  await payoutRef.update({
-    status: 'approved',
-    approvedBy: context.auth.uid,
-    approvedAt: new Date().toISOString(),
+  // State-transition guard inside a transaction: only a payout currently
+  // awaiting approval can be approved. This prevents two concurrent/repeat
+  // calls from both "succeeding" against the same payout (e.g. re-approving
+  // one that's already been paid).
+  const payoutData = await db.runTransaction(async (transaction) => {
+    const payoutDoc = await transaction.get(payoutRef);
+    if (!payoutDoc.exists) {
+      throw new functions.https.HttpsError('not-found', `Payout ${payoutId} not found.`);
+    }
+    const data = payoutDoc.data()!;
+    if (data.status !== 'documents_required' && data.status !== 'under_review') {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        `Payout is currently '${data.status}' and cannot be approved from this state.`
+      );
+    }
+    transaction.update(payoutRef, {
+      status: 'approved',
+      approvedBy: context.auth!.uid,
+      approvedAt: new Date().toISOString(),
+    });
+    return data;
   });
 
   await writeAuditLog({
@@ -622,18 +660,30 @@ export const disbursePayout = functions.https.onCall(async (data, context) => {
   const { isSuper } = await checkIsEkubAdminOrSuperAdmin(context.auth.uid, ekubId, context.auth);
 
   const payoutRef = db.collection('ekubs').doc(ekubId).collection('payouts').doc(payoutId);
-  const payoutDoc = await payoutRef.get();
-  if (!payoutDoc.exists) {
-    throw new functions.https.HttpsError('not-found', `Payout ${payoutId} not found.`);
-  }
 
-  const payoutData = payoutDoc.data()!;
-
-  await payoutRef.update({
-    status: 'paid',
-    paymentReference,
-    processedAt: new Date().toISOString(),
-    disbursedBy: context.auth.uid,
+  // State-transition guard: only an 'approved' payout can be disbursed, and
+  // only once. Without this, two concurrent/repeat calls could both mark
+  // the same payout 'paid' with two different payment references, silently
+  // overwriting the record of what was actually sent.
+  const payoutData = await db.runTransaction(async (transaction) => {
+    const payoutDoc = await transaction.get(payoutRef);
+    if (!payoutDoc.exists) {
+      throw new functions.https.HttpsError('not-found', `Payout ${payoutId} not found.`);
+    }
+    const data = payoutDoc.data()!;
+    if (data.status !== 'approved') {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        `Payout is currently '${data.status}' and must be 'approved' before it can be disbursed.`
+      );
+    }
+    transaction.update(payoutRef, {
+      status: 'paid',
+      paymentReference,
+      processedAt: new Date().toISOString(),
+      disbursedBy: context.auth!.uid,
+    });
+    return data;
   });
 
   await writeAuditLog({
@@ -649,4 +699,121 @@ export const disbursePayout = functions.https.onCall(async (data, context) => {
   });
 
   return { success: true, message: `Payout disbursed with reference ${paymentReference}.` };
+});
+
+// ============================================================================
+// 7. APPROVE MEMBERSHIP REQUEST (Super Admin or Ekub Admin)
+// A prospective member self-requests to join (client writes their own
+// members/{uid} doc directly with status: 'pending' -- allowed by
+// firestore.rules). This function is how an Ekub Admin/Super Admin accepts
+// that request: it must go through a Cloud Function (not a direct client
+// update) because it also increments the Ekub's currentMemberCount, which
+// is not in the client-updatable field list for Ekub Admins.
+// ============================================================================
+export const approveMembershipRequest = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated.');
+  }
+
+  const { ekubId, userId } = data;
+  if (!ekubId || !userId) {
+    throw new functions.https.HttpsError('invalid-argument', 'ekubId and userId are required.');
+  }
+
+  const { isSuper } = await checkIsEkubAdminOrSuperAdmin(context.auth.uid, ekubId, context.auth);
+
+  const ekubRef = db.collection('ekubs').doc(ekubId);
+  const memberRef = ekubRef.collection('members').doc(userId);
+
+  await db.runTransaction(async (transaction) => {
+    const memberDoc = await transaction.get(memberRef);
+    if (!memberDoc.exists) {
+      throw new functions.https.HttpsError('not-found', 'No membership request found for this user.');
+    }
+    const memberData = memberDoc.data()!;
+    if (memberData.status !== 'pending') {
+      throw new functions.https.HttpsError('failed-precondition', `This member is already '${memberData.status}', not pending.`);
+    }
+    transaction.update(memberRef, {
+      status: 'active',
+      eligibleForDraw: true,
+      updatedAt: new Date().toISOString(),
+    });
+    transaction.update(ekubRef, {
+      currentMemberCount: admin.firestore.FieldValue.increment(1),
+    });
+  });
+
+  await writeAuditLog({
+    actorId: context.auth.uid,
+    actorName: isSuper ? 'Super Admin' : 'Ekub Admin',
+    actorRole: isSuper ? 'super_admin' : 'admin',
+    action: 'MEMBERSHIP_APPROVED',
+    entityType: 'member',
+    entityId: userId,
+    ekubId,
+    reason: `Membership request approved for user ${userId}`,
+    newState: { status: 'active' },
+  });
+
+  return { success: true, message: 'Membership request approved.' };
+});
+
+// ============================================================================
+// 8. REMOVE EKUB MEMBER (Super Admin or Ekub Admin)
+// Used both to reject a still-pending request and to remove an existing
+// active member. currentMemberCount is only decremented if the member being
+// removed was actually 'active' (a pending request was never counted).
+// ============================================================================
+export const removeEkubMember = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated.');
+  }
+
+  const { ekubId, userId } = data;
+  if (!ekubId || !userId) {
+    throw new functions.https.HttpsError('invalid-argument', 'ekubId and userId are required.');
+  }
+
+  const { isSuper } = await checkIsEkubAdminOrSuperAdmin(context.auth.uid, ekubId, context.auth);
+
+  const ekubRef = db.collection('ekubs').doc(ekubId);
+  const memberRef = ekubRef.collection('members').doc(userId);
+
+  const removedMember = await db.runTransaction(async (transaction) => {
+    const memberDoc = await transaction.get(memberRef);
+    if (!memberDoc.exists) {
+      throw new functions.https.HttpsError('not-found', 'That member does not exist in this Ekub.');
+    }
+    const memberData = memberDoc.data()!;
+    if (memberData.role === 'admin') {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        'The current Ekub Admin cannot be removed as a member -- reassign the Ekub Admin first.'
+      );
+    }
+    transaction.delete(memberRef);
+    if (memberData.status === 'active') {
+      transaction.update(ekubRef, {
+        currentMemberCount: admin.firestore.FieldValue.increment(-1),
+      });
+    }
+    return memberData;
+  });
+
+  await writeAuditLog({
+    actorId: context.auth.uid,
+    actorName: isSuper ? 'Super Admin' : 'Ekub Admin',
+    actorRole: isSuper ? 'super_admin' : 'admin',
+    action: removedMember.status === 'pending' ? 'MEMBERSHIP_REQUEST_REJECTED' : 'MEMBER_REMOVED',
+    entityType: 'member',
+    entityId: userId,
+    ekubId,
+    reason: removedMember.status === 'pending'
+      ? `Membership request rejected for ${removedMember.displayName || userId}`
+      : `Member ${removedMember.displayName || userId} removed from Ekub`,
+    previousState: { status: removedMember.status },
+  });
+
+  return { success: true, message: 'Member removed.' };
 });

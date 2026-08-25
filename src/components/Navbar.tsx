@@ -35,6 +35,7 @@ interface NavbarProps {
   onOpenCreateEkub?: () => void;
   onOpenJoinEkub?: () => void;
   onOpenLegal: () => void;
+  hasAdminAccess?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -48,10 +49,11 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenCreateEkub,
   onOpenJoinEkub,
   onOpenLegal,
+  hasAdminAccess = false,
 }) => {
   const currentTab = activeTabProp || currentTabProp || 'dashboard';
   const setCurrentTab = onNavigateProp || setCurrentTabProp || (() => {});
-  const { userProfile, signOut, isAdmin, isOrganizer } = useAuth();
+  const { userProfile, signOut, isAdmin } = useAuth();
   const { language, toggleLanguage, t } = useTranslation();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -145,7 +147,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               {t.payouts}
             </button>
 
-            {isOrganizer && (
+            {hasAdminAccess && (
               <button
                 onClick={() => setCurrentTab('admin')}
                 className={`transition-all py-1 px-2.5 rounded-sm text-[11px] font-bold ${
@@ -333,7 +335,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span>{t.payouts}</span>
           </button>
 
-          {isOrganizer && (
+          {hasAdminAccess && (
             <button
               onClick={() => { setCurrentTab('admin'); setMobileMenuOpen(false); }}
               className={`w-full flex items-center space-x-2 px-3 py-2.5 rounded-sm bg-[#7856FF] text-white font-bold`}

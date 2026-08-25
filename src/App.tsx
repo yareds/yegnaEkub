@@ -75,22 +75,51 @@ function MainAppContent() {
   const refreshAllData = async () => {
     try {
       const isSuperAdminUser = userProfile?.role === 'super_admin' || (userProfile?.role as string) === 'admin';
-      const userIdParam = isSuperAdminUser ? undefined : userProfile?.uid;
-      const [eList, cList, dList, pList, nList, tList] = await Promise.all([
-        getEkubs(),
-        getContributions(undefined, userIdParam),
-        getDraws(),
-        getPayouts(undefined, userIdParam),
-        getNotifications(userProfile?.uid),
-        getSupportTickets(userIdParam),
-      ]);
 
+      // Ekub list is needed up front to know which circles (if any) this
+      // user administers, since contribution/payout scope depends on that.
+      const eList = await getEkubs();
       setEkubs(Array.isArray(eList) ? eList : []);
-      setContributions(Array.isArray(cList) ? cList : []);
+
+      const adminEkubIds = Array.isArray(eList)
+        ? eList.filter(e => e.adminId === userProfile?.uid).map(e => e.id)
+        : [];
+
+      const [dList, nList, tList] = await Promise.all([
+        getDraws(),
+        getNotifications(userProfile?.uid),
+        getSupportTickets(isSuperAdminUser ? undefined : userProfile?.uid),
+      ]);
       setDraws(Array.isArray(dList) ? dList : []);
-      setPayouts(Array.isArray(pList) ? pList : []);
       setNotifications(Array.isArray(nList) ? nList : []);
       setTickets(Array.isArray(tList) ? tList : []);
+
+      if (isSuperAdminUser) {
+        // Super Admin: unfiltered, platform-wide.
+        const [cList, pList] = await Promise.all([getContributions(), getPayouts()]);
+        setContributions(Array.isArray(cList) ? cList : []);
+        setPayouts(Array.isArray(pList) ? pList : []);
+      } else {
+        // Everyone else: their own contributions/payouts as a member
+        // (across any Ekub they belong to), PLUS -- if they administer one
+        // or more Ekubs -- the FULL, unfiltered contributions/payouts for
+        // those specific circles, since an Ekub Admin needs to see and
+        // verify every member's submissions, not just their own.
+        const [ownContribs, ownPayouts, adminContribArrays, adminPayoutArrays] = await Promise.all([
+          getContributions(undefined, userProfile?.uid),
+          getPayouts(undefined, userProfile?.uid),
+          Promise.all(adminEkubIds.map(id => getContributions(id))),
+          Promise.all(adminEkubIds.map(id => getPayouts(id))),
+        ]);
+
+        const contribMap = new Map<string, Contribution>();
+        [...(ownContribs || []), ...adminContribArrays.flat()].forEach(c => contribMap.set(c.id, c));
+        setContributions(Array.from(contribMap.values()));
+
+        const payoutMap = new Map<string, Payout>();
+        [...(ownPayouts || []), ...adminPayoutArrays.flat()].forEach(p => payoutMap.set(p.id, p));
+        setPayouts(Array.from(payoutMap.values()));
+      }
     } catch (err) {
       console.error('Error loading data:', err);
     } finally {
@@ -184,6 +213,7 @@ function MainAppContent() {
         onOpenJoinEkub={() => setShowJoinEkub(true)}
         onOpenLegal={() => setShowLegal(true)}
         unreadCount={(notifications || []).filter(n => !n.read).length}
+        hasAdminAccess={hasAdminAccess}
       />
 
       {/* Main Content Area */}
@@ -295,6 +325,7 @@ function MainAppContent() {
         activeTab={selectedEkub ? 'ekub-detail' : activeTab}
         onNavigate={handleNavigate}
         unreadCount={(notifications || []).filter(n => !n.read).length}
+        hasAdminAccess={hasAdminAccess}
       />
 
       {/* MODALS */}

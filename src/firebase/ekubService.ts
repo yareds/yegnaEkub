@@ -45,6 +45,8 @@ const rejectContributionCallable = httpsCallable<{ ekubId: string; contributionI
 const executeDrawCallable = httpsCallable<any, { success: boolean; draw: Draw; payout: Payout; winner: EkubMember; proof: any }>(functions, 'executeDraw');
 const approvePayoutCallable = httpsCallable<{ ekubId: string; payoutId: string }, { success: boolean; message: string }>(functions, 'approvePayout');
 const disbursePayoutCallable = httpsCallable<{ ekubId: string; payoutId: string; paymentReference: string }, { success: boolean; message: string }>(functions, 'disbursePayout');
+const approveMembershipRequestCallable = httpsCallable<{ ekubId: string; userId: string }, { success: boolean; message: string }>(functions, 'approveMembershipRequest');
+const removeEkubMemberCallable = httpsCallable<{ ekubId: string; userId: string }, { success: boolean; message: string }>(functions, 'removeEkubMember');
 
 // ============================================================================
 // EKUBS
@@ -122,14 +124,79 @@ export const joinEkubWithInviteCode = async (inviteCode: string, userId: string,
     throw new Error('Invalid or expired Ekub invite code.');
   }
 
-  await joinEkub(found.id, {
+  await requestToJoinEkub(found.id, {
     userId,
     displayName,
-    role: 'member',
-    status: 'active',
+    userEmail,
   });
 
   return found;
+};
+
+// A prospective member requests to join by writing their OWN member doc
+// directly, with status: 'pending' -- this is a self-write permitted by
+// firestore.rules specifically for this shape (pending, role: member, not
+// yet draw-eligible). It does NOT make them an active member; an Ekub
+// Admin or Super Admin must call approveMembershipRequest() to accept it.
+// This replaces the old joinEkub() flow, which incorrectly routed through
+// the addEkubMember Cloud Function -- a function that requires the caller
+// to already BE the Ekub Admin, so a prospective member's own join attempt
+// could never succeed.
+export const requestToJoinEkub = async (ekubId: string, memberData: { userId: string; displayName: string; userEmail?: string; phoneNumber?: string; photoURL?: string }): Promise<EkubMember> => {
+  const memberRef = doc(db, 'ekubs', ekubId, 'members', memberData.userId);
+  const existing = await getDoc(memberRef);
+  if (existing.exists()) {
+    const existingData = existing.data() as EkubMember;
+    if (existingData.status === 'pending') {
+      throw new Error('You already have a pending request to join this Ekub.');
+    }
+    throw new Error('You are already a member of this Ekub.');
+  }
+
+  const requestDoc: EkubMember = {
+    userId: memberData.userId,
+    displayName: memberData.displayName,
+    email: memberData.userEmail,
+    phoneNumber: memberData.phoneNumber,
+    photoURL: memberData.photoURL,
+    role: 'member',
+    status: 'pending',
+    joinedAt: new Date().toISOString(),
+    contributionStatus: 'pending',
+    eligibleForDraw: false,
+    hasReceivedPayout: false,
+    totalContributed: 0,
+  };
+
+  await setDoc(memberRef, requestDoc);
+  return requestDoc;
+};
+
+// Ekub Admin / Super Admin accepts a pending membership request. Goes
+// through a Cloud Function because it also increments the Ekub's
+// currentMemberCount, a field Ekub Admins cannot write directly per the
+// Firestore rules' field allowlist on the ekubs collection.
+export const approveMembershipRequest = async (ekubId: string, userId: string): Promise<boolean> => {
+  try {
+    const res = await approveMembershipRequestCallable({ ekubId, userId });
+    return res.data.success;
+  } catch (err: any) {
+    console.error('approveMembershipRequest failed:', err);
+    throw new Error(err?.message || 'Failed to approve membership request.');
+  }
+};
+
+// Ekub Admin / Super Admin rejects a pending request, or removes an
+// existing active member. The current Ekub Admin's own member record
+// cannot be removed this way -- reassign the Ekub Admin first.
+export const removeEkubMember = async (ekubId: string, userId: string): Promise<boolean> => {
+  try {
+    const res = await removeEkubMemberCallable({ ekubId, userId });
+    return res.data.success;
+  } catch (err: any) {
+    console.error('removeEkubMember failed:', err);
+    throw new Error(err?.message || 'Failed to remove member.');
+  }
 };
 
 // ============================================================================

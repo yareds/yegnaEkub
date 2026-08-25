@@ -41,7 +41,8 @@ service cloud.firestore {
 
     function isEkubMember(ekubId) {
       return isAuthenticated() &&
-        exists(/databases/$(database)/documents/ekubs/$(ekubId)/members/$(request.auth.uid));
+        exists(/databases/$(database)/documents/ekubs/$(ekubId)/members/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/ekubs/$(ekubId)/members/$(request.auth.uid)).data.status == 'active';
     }
 
     // ==========================================================================
@@ -113,12 +114,25 @@ service cloud.firestore {
 
       // --- Members Subcollection ---
       match /members/{memberId} {
-        allow read: if isSuperAdmin() || isEkubAdmin(ekubId) ||
-          (isEkubMember(ekubId) && isOwner(memberId));
+        // A user can always read their own member doc regardless of status
+        // (pending or active) -- so someone with a pending request can see
+        // that it's pending. isEkubMember() now requires status=='active',
+        // so it would otherwise wrongly hide a pending requester's own doc
+        // from themselves.
+        allow read: if isSuperAdmin() || isEkubAdmin(ekubId) || isOwner(memberId);
 
-        // Members can't add themselves directly -- joining happens via the
-        // addEkubMember Cloud Function (which can validate invite codes).
-        allow create: if isSuperAdmin() || isEkubAdmin(ekubId);
+        // Members can't add themselves as an active member directly --
+        // regular joining happens via the addEkubMember Cloud Function
+        // (admin-initiated) or the self-request path below (member-
+        // initiated, always starts 'pending' and never draw-eligible until
+        // an admin accepts it via the approveMembershipRequest function).
+        allow create: if isSuperAdmin() || isEkubAdmin(ekubId) || (
+          isOwner(memberId) &&
+          request.resource.data.status == 'pending' &&
+          request.resource.data.role == 'member' &&
+          request.resource.data.hasReceivedPayout == false &&
+          request.resource.data.eligibleForDraw == false
+        );
 
         // The Ekub Admin/Super Admin can update anything on a member doc.
         // The member themself may only touch their own display fields --

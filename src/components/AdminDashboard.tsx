@@ -35,7 +35,9 @@ import {
   disbursePayout, 
   getAuditLogs, 
   assignEkubAdmin,
-  getEkubMembers
+  getEkubMembers,
+  approveMembershipRequest,
+  removeEkubMember
 } from '../firebase/ekubService';
 
 interface AdminDashboardProps {
@@ -83,7 +85,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const scopedPayouts = (payouts || []).filter(p => activeEkubIds.has(p.ekubId));
 
   // Tabs
-  const [activeTab, setActiveTab] = useState<'receipts' | 'draws' | 'payouts' | 'manage_admins' | 'disputes' | 'audit'>('receipts');
+  const [activeTab, setActiveTab] = useState<'receipts' | 'members' | 'draws' | 'payouts' | 'manage_admins' | 'disputes' | 'audit'>('receipts');
   
   // Modals & Action States
   const [inspectReceipt, setInspectReceipt] = useState<Contribution | null>(null);
@@ -95,6 +97,62 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [loadingAudit, setLoadingAudit] = useState(false);
   const [actionSuccess, setActionSuccess] = useState('');
   const [actionError, setActionError] = useState('');
+
+  // Members tab state (pending requests + active roster for the currently
+  // scoped Ekub(s))
+  const [membersByEkub, setMembersByEkub] = useState<Record<string, EkubMember[]>>({});
+  const [loadingMemberRoster, setLoadingMemberRoster] = useState(false);
+  const [processingMemberId, setProcessingMemberId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (activeTab === 'members' && activeEkubList.length > 0) {
+      setLoadingMemberRoster(true);
+      Promise.all(activeEkubList.map(async (e) => [e.id, await getEkubMembers(e.id)] as const))
+        .then((pairs) => {
+          const map: Record<string, EkubMember[]> = {};
+          pairs.forEach(([id, members]) => { map[id] = members; });
+          setMembersByEkub(map);
+        })
+        .finally(() => setLoadingMemberRoster(false));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, selectedEkubFilter]);
+
+  const handleApproveMember = async (ekubId: string, userId: string) => {
+    setProcessingMemberId(userId);
+    setActionError('');
+    try {
+      await approveMembershipRequest(ekubId, userId);
+      setActionSuccess('Membership request approved.');
+      const refreshed = await getEkubMembers(ekubId);
+      setMembersByEkub(prev => ({ ...prev, [ekubId]: refreshed }));
+      onRefreshData();
+    } catch (err: any) {
+      setActionError(err.message || 'Failed to approve request.');
+    } finally {
+      setProcessingMemberId(null);
+    }
+  };
+
+  const handleRemoveMember = async (ekubId: string, userId: string, isPending: boolean) => {
+    const confirmMsg = isPending
+      ? 'Reject this membership request?'
+      : 'Remove this member from the Ekub? This cannot be undone.';
+    if (!window.confirm(confirmMsg)) return;
+    setProcessingMemberId(userId);
+    setActionError('');
+    try {
+      await removeEkubMember(ekubId, userId);
+      setActionSuccess(isPending ? 'Request rejected.' : 'Member removed.');
+      const refreshed = await getEkubMembers(ekubId);
+      setMembersByEkub(prev => ({ ...prev, [ekubId]: refreshed }));
+      onRefreshData();
+    } catch (err: any) {
+      setActionError(err.message || 'Failed to remove member.');
+    } finally {
+      setProcessingMemberId(null);
+    }
+  };
 
   // Manage Ekub Admins state (Super Admin exclusive)
   const [targetEkubIdForAdmin, setTargetEkubIdForAdmin] = useState<string>(ekubs[0]?.id || '');
@@ -389,6 +447,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </button>
 
         <button
+          onClick={() => setActiveTab('members')}
+          className={`pb-3 px-4 text-xs font-bold whitespace-nowrap border-b-2 flex items-center space-x-1.5 transition-all ${
+            activeTab === 'members'
+              ? 'border-[#7856FF] text-[#7856FF]'
+              : 'border-transparent text-gray-500 hover:text-gray-800'
+          }`}
+        >
+          <Users className="w-4 h-4" />
+          <span>Members</span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('draws')}
           className={`pb-3 px-4 text-xs font-bold whitespace-nowrap border-b-2 flex items-center space-x-1.5 transition-all ${
             activeTab === 'draws'
@@ -439,18 +509,116 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <span>Disputes & Tickets ({openTickets.length})</span>
         </button>
 
-        <button
-          onClick={() => setActiveTab('audit')}
-          className={`pb-3 px-4 text-xs font-bold whitespace-nowrap border-b-2 flex items-center space-x-1.5 transition-all ${
-            activeTab === 'audit'
-              ? 'border-[#7856FF] text-[#7856FF]'
-              : 'border-transparent text-gray-500 hover:text-gray-800'
-          }`}
-        >
-          <FileText className="w-4 h-4" />
-          <span>Immutable Audit Logs</span>
-        </button>
+        {/* Audit tab: Super Admin only. The Firestore rule for auditLogs
+            depends on resource.data.ekubId with no matching query filter in
+            getAuditLogs() -- an unfiltered list query with a field-dependent
+            rule is rejected outright for anyone who isn't provably covered
+            by a document-independent branch (Super Admin is; Ekub Admin
+            isn't). Restricting this tab to Super Admin avoids that error
+            rather than hitting it. */}
+        {isSuperAdmin && (
+          <button
+            onClick={() => setActiveTab('audit')}
+            className={`pb-3 px-4 text-xs font-bold whitespace-nowrap border-b-2 flex items-center space-x-1.5 transition-all ${
+              activeTab === 'audit'
+                ? 'border-[#7856FF] text-[#7856FF]'
+                : 'border-transparent text-gray-500 hover:text-gray-800'
+            }`}
+          >
+            <FileText className="w-4 h-4" />
+            <span>Immutable Audit Logs</span>
+          </button>
+        )}
       </div>
+
+      {/* TAB: MEMBER MANAGEMENT -- pending requests + active roster */}
+      {activeTab === 'members' && (
+        <div className="bg-white rounded-2xl border border-[#E6E1F5] p-6 shadow-sm space-y-6">
+          {loadingMemberRoster ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="w-8 h-8 border-3 border-[#7856FF] border-t-transparent animate-spin rounded-full" />
+            </div>
+          ) : activeEkubList.length === 0 ? (
+            <p className="text-sm text-gray-500 text-center py-8">No Ekub selected or assigned yet.</p>
+          ) : (
+            activeEkubList.map((ekub) => {
+              const members = membersByEkub[ekub.id] || [];
+              const pending = members.filter(m => m.status === 'pending');
+              const active = members.filter(m => m.status !== 'pending');
+              return (
+                <div key={ekub.id} className="border border-[#E6E1F5] rounded-xl overflow-hidden">
+                  <div className="bg-[#F8F7FC] px-4 py-3 border-b border-[#E6E1F5]">
+                    <h3 className="text-sm font-bold text-[#1C1132]">{ekub.name}</h3>
+                    <p className="text-[11px] text-gray-500">{active.length} active member(s) &middot; {pending.length} pending request(s)</p>
+                  </div>
+
+                  {pending.length > 0 && (
+                    <div className="p-4 space-y-2 border-b border-[#E6E1F5]">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-amber-600 mb-2">Pending Requests</p>
+                      {pending.map((m) => (
+                        <div key={m.userId} className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                          <div>
+                            <p className="text-xs font-bold text-gray-900">{m.displayName}</p>
+                            {m.email && <p className="text-[10px] text-gray-500">{m.email}</p>}
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <button
+                              onClick={() => handleApproveMember(ekub.id, m.userId)}
+                              disabled={processingMemberId === m.userId}
+                              className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-[10px] font-bold uppercase rounded-md transition-colors disabled:opacity-50"
+                            >
+                              Accept
+                            </button>
+                            <button
+                              onClick={() => handleRemoveMember(ekub.id, m.userId, true)}
+                              disabled={processingMemberId === m.userId}
+                              className="px-3 py-1.5 bg-white border border-red-300 hover:bg-red-50 text-red-600 text-[10px] font-bold uppercase rounded-md transition-colors disabled:opacity-50"
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="p-4 space-y-2">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-2">Active Members</p>
+                    {active.length === 0 ? (
+                      <p className="text-xs text-gray-400">No active members yet.</p>
+                    ) : (
+                      active.map((m) => (
+                        <div key={m.userId} className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-gray-50">
+                          <div>
+                            <p className="text-xs font-bold text-gray-900">
+                              {m.displayName}{' '}
+                              {m.role === 'admin' && (
+                                <span className="ml-1 text-[9px] bg-[#7856FF]/15 text-[#7856FF] px-1.5 py-0.5 rounded uppercase font-bold">Admin</span>
+                              )}
+                            </p>
+                            <p className="text-[10px] text-gray-500">
+                              {m.contributionStatus} &middot; {m.eligibleForDraw ? 'Eligible for draw' : 'Not yet eligible'}
+                            </p>
+                          </div>
+                          {m.role !== 'admin' && (
+                            <button
+                              onClick={() => handleRemoveMember(ekub.id, m.userId, false)}
+                              disabled={processingMemberId === m.userId}
+                              className="px-3 py-1.5 bg-white border border-red-300 hover:bg-red-50 text-red-600 text-[10px] font-bold uppercase rounded-md transition-colors disabled:opacity-50"
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
 
       {/* TAB 1: PENDING RECEIPTS VERIFICATION */}
       {activeTab === 'receipts' && (
@@ -848,7 +1016,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       )}
 
       {/* TAB 5: IMMUTABLE AUDIT LOGS */}
-      {activeTab === 'audit' && (
+      {isSuperAdmin && activeTab === 'audit' && (
         <div className="bg-white rounded-2xl border border-[#E6E1F5] p-6 shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <div>

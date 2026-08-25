@@ -22,6 +22,9 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   isAdmin: boolean;
   isSuperAdmin: boolean;
+  /** @deprecated Equivalent to isSuperAdmin -- does NOT reflect per-Ekub admin
+   *  status. Use App.tsx's hasAdminAccess (isSuperAdmin || is admin of some
+   *  Ekub) for any UI that should be visible to Ekub Admins too. */
   isOrganizer: boolean;
   refreshProfile: () => Promise<void>;
 }

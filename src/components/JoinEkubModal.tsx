@@ -125,7 +125,9 @@ export const JoinEkubModal: React.FC<JoinEkubModalProps> = ({
                 className="w-full p-3 border border-[#E6E1F5] rounded-xl font-mono text-center text-base tracking-[0.2em] uppercase outline-none focus:border-[#7856FF]"
               />
               <p className="text-[11px] text-gray-500 mt-1">
-                Try sample codes: <strong className="font-mono text-gray-800">BOLE24</strong>, <strong className="font-mono text-gray-800">ADDIS1</strong>, or <strong className="font-mono text-gray-800">MEK009</strong>
+                Your request will be sent to that circle's Admin. You'll become an active
+                member once they approve it -- you won't be able to contribute or see
+                private details until then.
               </p>
             </div>
 
@@ -147,7 +149,7 @@ export const JoinEkubModal: React.FC<JoinEkubModalProps> = ({
               disabled={submitting}
               className="px-5 py-2.5 bg-[#7856FF] hover:bg-[#6340FF] text-white font-bold text-xs uppercase tracking-widest shadow-md active:scale-98 transition-all disabled:opacity-50 flex items-center justify-center space-x-2 rounded-xl"
             >
-              <span>{submitting ? 'Verifying...' : 'Join Circle'}</span>
+              <span>{submitting ? 'Sending Request...' : 'Send Join Request'}</span>
               <ArrowRight className="w-4 h-4 text-white" />
             </button>
           </div>
@@ -157,4 +159,3 @@ export const JoinEkubModal: React.FC<JoinEkubModalProps> = ({
     </div>
   );
 };
-

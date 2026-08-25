@@ -1,14 +1,15 @@
 import React from 'react';
-import { LayoutDashboard, Layers, Receipt, Sparkles, Banknote } from 'lucide-react';
+import { LayoutDashboard, Layers, Receipt, Sparkles, Banknote, ShieldCheck } from 'lucide-react';
 import { useTranslation } from '../locales/TranslationContext';
 
 interface MobileNavProps {
   activeTab: string;
   onNavigate: (tab: string) => void;
   unreadCount?: number;
+  hasAdminAccess?: boolean;
 }
 
-export const MobileNav: React.FC<MobileNavProps> = ({ activeTab, onNavigate }) => {
+export const MobileNav: React.FC<MobileNavProps> = ({ activeTab, onNavigate, hasAdminAccess }) => {
   const { t, language } = useTranslation();
 
   return (
@@ -77,6 +78,21 @@ export const MobileNav: React.FC<MobileNavProps> = ({ activeTab, onNavigate }) =
           <div className="w-1 h-1 bg-[#7856FF] rounded-full mt-0.5" />
         )}
       </button>
+
+      {hasAdminAccess && (
+        <button
+          onClick={() => onNavigate('admin')}
+          className={`flex flex-col items-center py-1 px-2.5 transition-colors relative ${
+            activeTab === 'admin' ? 'text-[#7856FF] font-bold' : 'text-gray-400 hover:text-gray-800'
+          }`}
+        >
+          <ShieldCheck className={`w-5 h-5 ${activeTab === 'admin' ? 'stroke-[2.5]' : 'stroke-[1.75]'}`} />
+          <span className="text-[9px] uppercase tracking-wider mt-0.5">{language === 'am' ? 'አስተዳደር' : 'Admin'}</span>
+          {activeTab === 'admin' && (
+            <div className="w-1 h-1 bg-[#7856FF] rounded-full mt-0.5" />
+          )}
+        </button>
+      )}
     </div>
   );
 };
