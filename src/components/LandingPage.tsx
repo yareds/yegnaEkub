@@ -24,6 +24,10 @@ interface LandingPageProps {
   onJoinEkub: () => void;
   onExploreEkubs: () => void;
   onOpenLegal: () => void;
+  /** Only a Super Admin can create an Ekub, so the "Start an Ekub" CTA is
+   *  only meaningful for them. Defaults to false (safe default for the
+   *  logged-out public landing page, where nobody's role is known yet). */
+  isAdmin?: boolean;
 }
 
 export const LandingPage: React.FC<LandingPageProps> = ({
@@ -31,6 +35,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   onJoinEkub,
   onExploreEkubs,
   onOpenLegal,
+  isAdmin = false,
 }) => {
   const { t, language } = useTranslation();
 
@@ -78,21 +83,28 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4 max-w-md mx-auto">
-            <button
-              onClick={onStartEkub}
-              className="w-full sm:w-auto px-6 py-3.5 bg-[#7856FF] hover:bg-[#6340FF] text-white font-bold text-xs uppercase tracking-widest shadow-lg shadow-[#7856FF]/25 transition-all flex items-center justify-center space-x-2 rounded-lg"
-            >
-              <Coins className="w-4 h-4" />
-              <span>{t.startEkub}</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
+            {isAdmin && (
+              <button
+                onClick={onStartEkub}
+                className="w-full sm:w-auto px-6 py-3.5 bg-[#7856FF] hover:bg-[#6340FF] text-white font-bold text-xs uppercase tracking-widest shadow-lg shadow-[#7856FF]/25 transition-all flex items-center justify-center space-x-2 rounded-lg"
+              >
+                <Coins className="w-4 h-4" />
+                <span>{t.startEkub}</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            )}
 
             <button
               onClick={onJoinEkub}
-              className="w-full sm:w-auto px-6 py-3.5 bg-white/10 hover:bg-white/15 text-white font-bold text-xs uppercase tracking-widest border border-white/20 transition-all flex items-center justify-center space-x-2 rounded-lg"
+              className={`w-full sm:w-auto px-6 py-3.5 font-bold text-xs uppercase tracking-widest transition-all flex items-center justify-center space-x-2 rounded-lg ${
+                isAdmin
+                  ? 'bg-white/10 hover:bg-white/15 text-white border border-white/20'
+                  : 'bg-[#7856FF] hover:bg-[#6340FF] text-white shadow-lg shadow-[#7856FF]/25'
+              }`}
             >
               <Users className="w-4 h-4" />
               <span>{t.joinEkub}</span>
+              {!isAdmin && <ArrowRight className="w-4 h-4" />}
             </button>
           </div>
 
@@ -235,12 +247,21 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 </div>
               </div>
 
-              <button
-                onClick={onStartEkub}
-                className="w-full mt-5 py-3 bg-[#7856FF] hover:bg-[#6340FF] text-white font-bold text-xs uppercase tracking-widest shadow-md transition-colors rounded-lg"
-              >
-                {language === 'am' ? 'በዚህ ስሌት ዕቁብ ጀምር' : 'Launch Ekub With This Setup'}
-              </button>
+              {isAdmin ? (
+                <button
+                  onClick={onStartEkub}
+                  className="w-full mt-5 py-3 bg-[#7856FF] hover:bg-[#6340FF] text-white font-bold text-xs uppercase tracking-widest shadow-md transition-colors rounded-lg"
+                >
+                  {language === 'am' ? 'በዚህ ስሌት ዕቁብ ጀምር' : 'Launch Ekub With This Setup'}
+                </button>
+              ) : (
+                <button
+                  onClick={onJoinEkub}
+                  className="w-full mt-5 py-3 bg-[#7856FF] hover:bg-[#6340FF] text-white font-bold text-xs uppercase tracking-widest shadow-md transition-colors rounded-lg"
+                >
+                  {language === 'am' ? 'ተመሳሳይ ዕቁብ ፈልግ ወይም ተቀላቀል' : 'Find or Join a Circle Like This'}
+                </button>
+              )}
             </div>
 
           </div>

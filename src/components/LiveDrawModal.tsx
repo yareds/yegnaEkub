@@ -7,10 +7,10 @@ import {
   Coins, 
   CheckCircle2, 
   AlertCircle, 
-  RotateCw,
-  Copy,
-  Check,
-  UserCheck
+  RotateCw, 
+  Copy, 
+  Check, 
+  UserCheck 
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useAuth } from '../firebase/AuthContext';
@@ -33,6 +33,12 @@ export const LiveDrawModal: React.FC<LiveDrawModalProps> = ({
 }) => {
   const { userProfile, isAdmin } = useAuth();
   const { t, language } = useTranslation();
+
+  // isAdmin (from useAuth) reflects Super Admin status only -- it does NOT
+  // know about per-Ekub admin assignment. A member should only ever be
+  // able to WATCH a draw; only the Super Admin or the specific Ekub Admin
+  // assigned to THIS Ekub should be able to launch it.
+  const canExecuteDraw = isAdmin || ekub.adminId === userProfile?.uid;
 
   const [members, setMembers] = useState<EkubMember[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(true);
@@ -225,15 +231,26 @@ export const LiveDrawModal: React.FC<LiveDrawModalProps> = ({
                 {t.cancel || 'Cancel'}
               </button>
 
-              <button
-                type="button"
-                onClick={handleStartDraw}
-                disabled={loadingMembers || members.length === 0}
-                className="flex-1 py-3.5 bg-[#7856FF] hover:bg-[#6340FF] text-white font-bold text-xs uppercase tracking-widest shadow-xl active:scale-98 transition-all disabled:opacity-50 flex items-center justify-center space-x-2 rounded-xl"
-              >
-                <Sparkles className="w-4 h-4" />
-                <span>{language === 'am' ? 'ዕጣውን አሁን ጀምር' : 'Launch Live Draw'}</span>
-              </button>
+              {canExecuteDraw ? (
+                <button
+                  type="button"
+                  onClick={handleStartDraw}
+                  disabled={loadingMembers || members.length === 0}
+                  className="flex-1 py-3.5 bg-[#7856FF] hover:bg-[#6340FF] text-white font-bold text-xs uppercase tracking-widest shadow-xl active:scale-98 transition-all disabled:opacity-50 flex items-center justify-center space-x-2 rounded-xl"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>{language === 'am' ? 'ዕጣውን አሁን ጀምር' : 'Launch Live Draw'}</span>
+                </button>
+              ) : (
+                <div className="flex-1 py-3.5 bg-white/5 border border-white/10 text-white/60 font-bold text-[11px] uppercase tracking-widest flex items-center justify-center space-x-2 rounded-xl">
+                  <ShieldCheck className="w-4 h-4 text-[#7856FF]" />
+                  <span>
+                    {language === 'am'
+                      ? 'የዕቁብ አስተዳዳሪ ዕጣውን እስኪጀምር ይጠብቁ'
+                      : 'Waiting for the Ekub Admin to start this draw'}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         )}

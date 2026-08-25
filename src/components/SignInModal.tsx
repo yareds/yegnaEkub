@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Mail, Lock, User as UserIcon, Phone, AlertCircle } from 'lucide-react';
+import { X, Mail, Lock, AlertCircle } from 'lucide-react';
 import { useAuth } from '../firebase/AuthContext';
 import { useTranslation } from '../locales/TranslationContext';
 import { YegnaEkubLogo } from './YegnaEkubLogo';
@@ -8,15 +8,17 @@ interface SignInModalProps {
   onClose: () => void;
 }
 
+// Sign-in only. Public self-registration has been deliberately removed --
+// the only way to get an account is to be invited by the Super Admin or an
+// Ekub Admin (see the inviteMember Cloud Function), or to be the bootstrap
+// Super Admin email on its first ever login. There is no "Create Account"
+// path here on purpose.
 export const SignInModal: React.FC<SignInModalProps> = ({ onClose }) => {
-  const { signInWithEmail, signUpWithEmail } = useAuth();
+  const { signInWithGoogle, signInWithEmail } = useAuth();
   const { language } = useTranslation();
 
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [fullName, setFullName] = useState('');
-  const [phoneNumber, setPhoneNumber] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -24,17 +26,20 @@ export const SignInModal: React.FC<SignInModalProps> = ({ onClose }) => {
 
   const friendlyError = (err: unknown): string => {
     const code = (err as { code?: string })?.code || '';
+    const name = (err as { name?: string })?.name || '';
+    if (name === 'NotInvitedError') {
+      return (err as Error).message;
+    }
     if (code.includes('auth/invalid-credential') || code.includes('auth/wrong-password') || code.includes('auth/user-not-found')) {
       return isAmharic ? 'የተሳሳተ ኢሜይል ወይም የይለፍ ቃል።' : 'Incorrect email or password.';
     }
-    if (code.includes('auth/email-already-in-use')) {
-      return isAmharic ? 'ይህ ኢሜይል አስቀድሞ ጥቅም ላይ ውሏል።' : 'That email is already registered. Try signing in instead.';
-    }
-    if (code.includes('auth/weak-password')) {
-      return isAmharic ? 'የይለፍ ቃል ቢያንስ 6 ቁምፊዎች ሊኖሩት ይገባል።' : 'Password must be at least 6 characters.';
-    }
     if (code.includes('auth/popup-closed-by-user') || code.includes('auth/cancelled-popup-request')) {
       return isAmharic ? 'የመግቢያ መስኮቱ ተዘግቷል።' : 'Sign-in window was closed before finishing.';
+    }
+    if (code.includes('auth/account-exists-with-different-credential')) {
+      return isAmharic
+        ? 'ይህ ኢሜይል ቀደም ሲል በሌላ የመግቢያ ዘዴ ተመዝግቧል። እባክዎ በኢሜይል/የይለፍ ቃል ይግቡ።'
+        : 'This email is already registered with a different sign-in method. Try signing in with email and password instead.';
     }
     if (code.includes('auth/operation-not-allowed')) {
       return isAmharic
@@ -44,21 +49,25 @@ export const SignInModal: React.FC<SignInModalProps> = ({ onClose }) => {
     return isAmharic ? 'የመግቢያ ሙከራ አልተሳካም። እባክዎ እንደገና ይሞክሩ።' : 'Something went wrong. Please try again.';
   };
 
+  const handleGoogle = async () => {
+    setError(null);
+    setSubmitting(true);
+    try {
+      await signInWithGoogle();
+      onClose();
+    } catch (err) {
+      setError(friendlyError(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
     try {
-      if (mode === 'signin') {
-        await signInWithEmail(email, password);
-      } else {
-        if (!fullName.trim()) {
-          setError(isAmharic ? 'እባክዎ ሙሉ ስምዎን ያስገቡ።' : 'Please enter your full name.');
-          setSubmitting(false);
-          return;
-        }
-        await signUpWithEmail(email, password, fullName.trim(), phoneNumber.trim());
-      }
+      await signInWithEmail(email, password);
       onClose();
     } catch (err) {
       setError(friendlyError(err));
@@ -81,10 +90,13 @@ export const SignInModal: React.FC<SignInModalProps> = ({ onClose }) => {
         <div className="px-8 pt-8 pb-2 flex flex-col items-center text-center">
           <YegnaEkubLogo variant="full" size="sm" theme="light" showSubtext={false} />
           <h2 className="mt-4 text-lg font-bold text-[#1C1132]">
-            {mode === 'signin'
-              ? (isAmharic ? 'ወደ መለያዎ ይግቡ' : 'Sign in to your account')
-              : (isAmharic ? 'አዲስ መለያ ይፍጠሩ' : 'Create your account')}
+            {isAmharic ? 'ወደ መለያዎ ይግቡ' : 'Sign in to your account'}
           </h2>
+          <p className="mt-1 text-[11px] text-gray-500 max-w-xs">
+            {isAmharic
+              ? 'መለያዎችን የሚፈጥረው በአስተዳዳሪ ግብዣ ብቻ ነው። መለያ ከሌልዎት፣ የእርስዎን ዕቁብ አስተዳዳሪ ወይም ዋና አስተዳዳሪ ያግኙ።'
+              : 'Accounts are created by invitation only. If you don\u2019t have one yet, contact your Ekub Admin or the Super Admin.'}
+          </p>
         </div>
 
         <div className="px-8 pb-8 pt-4 space-y-4">
@@ -95,33 +107,30 @@ export const SignInModal: React.FC<SignInModalProps> = ({ onClose }) => {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-3">
-            {mode === 'signup' && (
-              <>
-                <div className="relative">
-                  <UserIcon className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    placeholder={isAmharic ? 'ሙሉ ስም' : 'Full name'}
-                    className="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#7856FF]/40 focus:border-[#7856FF]"
-                    required
-                  />
-                </div>
-                <div className="relative">
-                  <Phone className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="tel"
-                    value={phoneNumber}
-                    onChange={(e) => setPhoneNumber(e.target.value)}
-                    placeholder={isAmharic ? 'ስልክ ቁጥር' : 'Phone number'}
-                    className="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#7856FF]/40 focus:border-[#7856FF]"
-                  />
-                </div>
-              </>
-            )}
+          <button
+            type="button"
+            onClick={handleGoogle}
+            disabled={submitting}
+            className="w-full flex items-center justify-center space-x-2 border border-gray-300 rounded-lg py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24">
+              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+            </svg>
+            <span>{isAmharic ? 'በGoogle ይግቡ' : 'Continue with Google'}</span>
+          </button>
 
+          <div className="flex items-center space-x-3">
+            <div className="flex-1 h-px bg-gray-200" />
+            <span className="text-[10px] uppercase tracking-widest text-gray-400 font-bold">
+              {isAmharic ? 'ወይም' : 'or'}
+            </span>
+            <div className="flex-1 h-px bg-gray-200" />
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-3">
             <div className="relative">
               <Mail className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
@@ -154,27 +163,9 @@ export const SignInModal: React.FC<SignInModalProps> = ({ onClose }) => {
             >
               {submitting
                 ? (isAmharic ? 'እባክዎ ይጠብቁ...' : 'Please wait...')
-                : mode === 'signin'
-                  ? (isAmharic ? 'ግባ' : 'Sign In')
-                  : (isAmharic ? 'መለያ ፍጠር' : 'Create Account')}
+                : (isAmharic ? 'ግባ' : 'Sign In')}
             </button>
           </form>
-
-          <p className="text-center text-xs text-gray-500">
-            {mode === 'signin'
-              ? (isAmharic ? 'መለያ የለዎትም?' : "Don't have an account?")
-              : (isAmharic ? 'መለያ አለዎት?' : 'Already have an account?')}
-            {' '}
-            <button
-              type="button"
-              onClick={() => { setMode(mode === 'signin' ? 'signup' : 'signin'); setError(null); }}
-              className="text-[#7856FF] font-bold hover:underline"
-            >
-              {mode === 'signin'
-                ? (isAmharic ? 'መለያ ይፍጠሩ' : 'Create one')
-                : (isAmharic ? 'ግቡ' : 'Sign in')}
-            </button>
-          </p>
         </div>
       </div>
     </div>

@@ -37,7 +37,8 @@ import {
   assignEkubAdmin,
   getEkubMembers,
   approveMembershipRequest,
-  removeEkubMember
+  removeEkubMember,
+  inviteMember
 } from '../firebase/ekubService';
 
 interface AdminDashboardProps {
@@ -151,6 +152,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setActionError(err.message || 'Failed to remove member.');
     } finally {
       setProcessingMemberId(null);
+    }
+  };
+
+  // Invite a brand-new person to the platform (public self-registration has
+  // been removed -- this is now the only way a new account gets created).
+  const [showInviteForm, setShowInviteForm] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteFullName, setInviteFullName] = useState('');
+  const [invitePhone, setInvitePhone] = useState('');
+  const [invitingUser, setInvitingUser] = useState(false);
+  const [inviteResetLink, setInviteResetLink] = useState<string | null>(null);
+  const [inviteCopied, setInviteCopied] = useState(false);
+
+  const handleInviteMember = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inviteEmail.trim() || !inviteFullName.trim()) return;
+    setInvitingUser(true);
+    setActionError('');
+    setInviteResetLink(null);
+    try {
+      const { resetLink } = await inviteMember(inviteEmail.trim(), inviteFullName.trim(), invitePhone.trim());
+      setInviteResetLink(resetLink);
+      setInviteEmail('');
+      setInviteFullName('');
+      setInvitePhone('');
+    } catch (err: any) {
+      setActionError(err.message || 'Failed to invite member.');
+    } finally {
+      setInvitingUser(false);
     }
   };
 
@@ -534,6 +564,94 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* TAB: MEMBER MANAGEMENT -- pending requests + active roster */}
       {activeTab === 'members' && (
         <div className="bg-white rounded-2xl border border-[#E6E1F5] p-6 shadow-sm space-y-6">
+          {/* Invite a new person to the platform. Public self-registration
+              has been removed, so this is the only way a brand-new account
+              gets created. */}
+          <div className="border border-[#E6E1F5] rounded-xl overflow-hidden">
+            <button
+              onClick={() => { setShowInviteForm(!showInviteForm); setInviteResetLink(null); }}
+              className="w-full px-4 py-3 bg-[#F8F7FC] flex items-center justify-between text-sm font-bold text-[#1C1132]"
+            >
+              <span className="flex items-center space-x-2">
+                <UserPlus className="w-4 h-4 text-[#7856FF]" />
+                <span>Invite a New Person</span>
+              </span>
+              <ChevronRight className={`w-4 h-4 transition-transform ${showInviteForm ? 'rotate-90' : ''}`} />
+            </button>
+
+            {showInviteForm && (
+              <div className="p-4">
+                {inviteResetLink ? (
+                  <div className="space-y-3">
+                    <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-xs text-green-800">
+                      Account created. Share this one-time link with them so they can set their
+                      password and sign in -- it is not sent automatically.
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <input
+                        readOnly
+                        value={inviteResetLink}
+                        className="flex-1 p-2.5 text-[11px] font-mono border border-[#E6E1F5] rounded-lg bg-gray-50 truncate"
+                        onFocus={(e) => e.target.select()}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(inviteResetLink);
+                          setInviteCopied(true);
+                          setTimeout(() => setInviteCopied(false), 2000);
+                        }}
+                        className="px-3 py-2.5 bg-[#7856FF] hover:bg-[#6340FF] text-white text-[10px] font-bold uppercase rounded-lg shrink-0"
+                      >
+                        {inviteCopied ? 'Copied!' : 'Copy'}
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setInviteResetLink(null)}
+                      className="text-[11px] font-bold text-[#7856FF] hover:underline"
+                    >
+                      Invite someone else
+                    </button>
+                  </div>
+                ) : (
+                  <form onSubmit={handleInviteMember} className="space-y-3">
+                    <input
+                      type="text"
+                      required
+                      value={inviteFullName}
+                      onChange={(e) => setInviteFullName(e.target.value)}
+                      placeholder="Full name"
+                      className="w-full p-2.5 text-xs border border-[#E6E1F5] rounded-lg outline-none focus:border-[#7856FF]"
+                    />
+                    <input
+                      type="email"
+                      required
+                      value={inviteEmail}
+                      onChange={(e) => setInviteEmail(e.target.value)}
+                      placeholder="Email address"
+                      className="w-full p-2.5 text-xs border border-[#E6E1F5] rounded-lg outline-none focus:border-[#7856FF]"
+                    />
+                    <input
+                      type="tel"
+                      value={invitePhone}
+                      onChange={(e) => setInvitePhone(e.target.value)}
+                      placeholder="Phone number (optional)"
+                      className="w-full p-2.5 text-xs border border-[#E6E1F5] rounded-lg outline-none focus:border-[#7856FF]"
+                    />
+                    <button
+                      type="submit"
+                      disabled={invitingUser}
+                      className="w-full py-2.5 bg-[#7856FF] hover:bg-[#6340FF] text-white text-xs font-bold uppercase rounded-lg disabled:opacity-50"
+                    >
+                      {invitingUser ? 'Sending Invite...' : 'Create Account & Get Invite Link'}
+                    </button>
+                  </form>
+                )}
+              </div>
+            )}
+          </div>
+
           {loadingMemberRoster ? (
             <div className="flex items-center justify-center py-12">
               <div className="w-8 h-8 border-3 border-[#7856FF] border-t-transparent animate-spin rounded-full" />

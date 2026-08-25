@@ -64,12 +64,20 @@ service cloud.firestore {
       // so this stays informational/display-only.
       allow read: if isAuthenticated();
 
-      // A user may only create their OWN profile, and it must start as
-      // 'member' -- UNLESS they already qualify as Super Admin by custom
-      // claim / bootstrap email (checked independently of this document),
-      // in which case their own first-login profile may say so.
-      allow create: if isOwner(userId) &&
-        (request.resource.data.role == 'member' || isSuperAdmin());
+      // Public self-registration has been removed. A user may create their
+      // OWN profile ONLY if they already independently qualify as Super
+      // Admin (the bootstrap email/claim case) -- this is not a loophole,
+      // since isSuperAdmin() here does not depend on this document at all.
+      // Every other profile (role: 'member') is created exclusively by the
+      // inviteMember Cloud Function using the Admin SDK, which bypasses
+      // these rules entirely -- so there is deliberately NO client-writable
+      // path left for a 'member' profile to self-create. Removing the app's
+      // sign-up button alone would not have been enough: anyone with a
+      // valid Firebase Auth session (e.g. via Google) could otherwise still
+      // call the Firestore SDK directly and write their own profile: this
+      // rule is the actual enforcement boundary, not the UI.
+      allow create: if isOwner(userId) && isSuperAdmin() &&
+        request.resource.data.role == 'super_admin';
 
       // A user may update only their own non-privileged fields. The `role`
       // field can never be changed via this path -- only a Super Admin can

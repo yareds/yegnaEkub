@@ -817,3 +817,91 @@ export const removeEkubMember = functions.https.onCall(async (data, context) => 
 
   return { success: true, message: 'Member removed.' };
 });
+
+// ============================================================================
+// 9. INVITE MEMBER TO THE PLATFORM (Super Admin, or any Ekub Admin)
+//
+// Public self-registration has been removed (see AuthContext.tsx and the
+// users/{userId} create rule in firestore.rules). This is now the ONLY way
+// a new 'member' account gets created: it pre-creates the Firebase Auth
+// user (via the Admin SDK, which bypasses client-side rules) AND their
+// Firestore profile in one step, then returns a password-reset link the
+// inviting admin can share with the person directly (WhatsApp, SMS, email,
+// etc.) -- there is no automatic email-sending configured here.
+// ============================================================================
+export const inviteMember = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated.');
+  }
+
+  const { email, fullName, phoneNumber } = data;
+  if (!email || !fullName) {
+    throw new functions.https.HttpsError('invalid-argument', 'email and fullName are required.');
+  }
+
+  const isSuper = await checkIsSuperAdmin(context.auth.uid, context.auth);
+  let isAnyEkubAdmin = false;
+  if (!isSuper) {
+    const adminEkubsSnap = await db.collection('ekubs').where('adminId', '==', context.auth.uid).limit(1).get();
+    isAnyEkubAdmin = !adminEkubsSnap.empty;
+  }
+  if (!isSuper && !isAnyEkubAdmin) {
+    throw new functions.https.HttpsError(
+      'permission-denied',
+      'Only the Super Admin or an Ekub Admin can invite new members.'
+    );
+  }
+
+  let userRecord: admin.auth.UserRecord;
+  try {
+    userRecord = await admin.auth().getUserByEmail(email);
+    const existingProfile = await db.collection('users').doc(userRecord.uid).get();
+    if (existingProfile.exists) {
+      throw new functions.https.HttpsError('already-exists', 'A YegnaEkub account for this email already exists.');
+    }
+    // Auth account exists but has no Firestore profile yet (e.g. a prior
+    // partial invite) -- fall through and create the profile below.
+  } catch (err: any) {
+    if (err instanceof functions.https.HttpsError) {
+      throw err;
+    }
+    if (err.code === 'auth/user-not-found') {
+      userRecord = await admin.auth().createUser({
+        email,
+        displayName: fullName,
+        emailVerified: false,
+      });
+    } else {
+      throw new functions.https.HttpsError('internal', 'Failed to look up or create the user account.');
+    }
+  }
+
+  const newProfile = {
+    uid: userRecord.uid,
+    fullName,
+    email,
+    phoneNumber: phoneNumber || '',
+    photoURL: '',
+    role: 'member',
+    preferredLanguage: 'en',
+    preferredPaymentMethod: 'telebirr',
+    verificationStatus: 'verified',
+    createdAt: new Date().toISOString(),
+  };
+  await db.collection('users').doc(userRecord.uid).set(newProfile);
+
+  const resetLink = await admin.auth().generatePasswordResetLink(email);
+
+  await writeAuditLog({
+    actorId: context.auth.uid,
+    actorName: isSuper ? 'Super Admin' : 'Ekub Admin',
+    actorRole: isSuper ? 'super_admin' : 'admin',
+    action: 'MEMBER_INVITED',
+    entityType: 'admin',
+    entityId: userRecord.uid,
+    reason: `Invited ${email} to the platform`,
+    newState: { email, fullName },
+  });
+
+  return { success: true, uid: userRecord.uid, resetLink };
+});

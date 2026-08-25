@@ -47,6 +47,7 @@ const approvePayoutCallable = httpsCallable<{ ekubId: string; payoutId: string }
 const disbursePayoutCallable = httpsCallable<{ ekubId: string; payoutId: string; paymentReference: string }, { success: boolean; message: string }>(functions, 'disbursePayout');
 const approveMembershipRequestCallable = httpsCallable<{ ekubId: string; userId: string }, { success: boolean; message: string }>(functions, 'approveMembershipRequest');
 const removeEkubMemberCallable = httpsCallable<{ ekubId: string; userId: string }, { success: boolean; message: string }>(functions, 'removeEkubMember');
+const inviteMemberCallable = httpsCallable<{ email: string; fullName: string; phoneNumber?: string }, { success: boolean; uid: string; resetLink: string }>(functions, 'inviteMember');
 
 // ============================================================================
 // EKUBS
@@ -196,6 +197,20 @@ export const removeEkubMember = async (ekubId: string, userId: string): Promise<
   } catch (err: any) {
     console.error('removeEkubMember failed:', err);
     throw new Error(err?.message || 'Failed to remove member.');
+  }
+};
+
+// Invite a brand-new person to the platform. Public self-registration has
+// been removed -- this is now the only way a 'member' account gets
+// created. Returns a password-reset link the inviting admin can share
+// directly (no automatic email is sent).
+export const inviteMember = async (email: string, fullName: string, phoneNumber?: string): Promise<{ uid: string; resetLink: string }> => {
+  try {
+    const res = await inviteMemberCallable({ email, fullName, phoneNumber });
+    return { uid: res.data.uid, resetLink: res.data.resetLink };
+  } catch (err: any) {
+    console.error('inviteMember failed:', err);
+    throw new Error(err?.message || 'Failed to invite member.');
   }
 };
 

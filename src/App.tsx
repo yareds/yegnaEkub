@@ -34,7 +34,7 @@ import { YegnaEkubLogo } from './components/YegnaEkubLogo';
 import { Ekub, Contribution, Draw, Payout, AppNotification, SupportTicket } from './types';
 
 function MainAppContent() {
-  const { userProfile, isSuperAdmin, user, loading: authLoading } = useAuth();
+  const { userProfile, isSuperAdmin, isAdmin, user, loading: authLoading } = useAuth();
   const { t, language } = useTranslation();
 
   // Navigation State
@@ -242,6 +242,7 @@ function MainAppContent() {
                 onJoinEkub={() => setShowJoinEkub(true)}
                 onExploreEkubs={() => handleNavigate('discover')}
                 onOpenLegal={() => setShowLegal(true)}
+                isAdmin={isAdmin}
               />
             )}
 
