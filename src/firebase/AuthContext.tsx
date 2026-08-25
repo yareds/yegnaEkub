@@ -6,7 +6,7 @@ import {
   signInWithEmailAndPassword, 
   signOut as firebaseSignOut,
 } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { auth, db, googleProvider } from './config';
 import { UserProfile } from '../types';
 
@@ -24,6 +24,7 @@ interface AuthContextType {
    *  Ekub) for any UI that should be visible to Ekub Admins too. */
   isOrganizer: boolean;
   refreshProfile: () => Promise<void>;
+  updateUserProfile: (updates: { fullName?: string; phoneNumber?: string; preferredLanguage?: 'en' | 'am'; preferredPaymentMethod?: UserProfile['preferredPaymentMethod'] }) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -184,6 +185,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  // Lets a signed-in user update their own non-privileged profile fields.
+  // Matches exactly the field allowlist the Firestore rules permit a user
+  // to self-update (fullName, phoneNumber, photoURL, preferredLanguage,
+  // preferredPaymentMethod, updatedAt) -- role can never be changed here,
+  // by rule, regardless of what's passed in.
+  const updateUserProfile = async (updates: { fullName?: string; phoneNumber?: string; preferredLanguage?: 'en' | 'am'; preferredPaymentMethod?: UserProfile['preferredPaymentMethod'] }) => {
+    if (!user) {
+      throw new Error('You must be signed in to update your profile.');
+    }
+    const payload = { ...updates, updatedAt: new Date().toISOString() };
+    await updateDoc(doc(db, 'users', user.uid), payload);
+    setUserProfile(prev => (prev ? { ...prev, ...payload } : prev));
+  };
+
   const isSuperAdmin = userProfile?.role === 'super_admin' || (userProfile?.role as string) === 'admin';
   const isAdmin = isSuperAdmin;
   const isOrganizer = isAdmin || userProfile?.role === 'organizer';
@@ -201,6 +216,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isSuperAdmin,
         isOrganizer,
         refreshProfile,
+        updateUserProfile,
       }}
     >
       {children}

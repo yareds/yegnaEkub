@@ -37,8 +37,7 @@ import {
   assignEkubAdmin,
   getEkubMembers,
   approveMembershipRequest,
-  removeEkubMember,
-  inviteMember
+  removeEkubMember
 } from '../firebase/ekubService';
 
 interface AdminDashboardProps {
@@ -108,11 +107,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   useEffect(() => {
     if (activeTab === 'members' && activeEkubList.length > 0) {
       setLoadingMemberRoster(true);
-      Promise.all(activeEkubList.map(async (e) => [e.id, await getEkubMembers(e.id)] as const))
+      // Fetch each Ekub's roster independently so one failing Ekub (e.g. a
+      // permission error) doesn't wipe out the roster for every other Ekub
+      // in the list -- and so a rejection here is always handled, never an
+      // unhandled promise rejection.
+      Promise.all(
+        activeEkubList.map(async (e) => {
+          try {
+            return [e.id, await getEkubMembers(e.id)] as const;
+          } catch (err: any) {
+            console.error(`Failed to load members for ${e.id}:`, err);
+            return [e.id, []] as const;
+          }
+        })
+      )
         .then((pairs) => {
           const map: Record<string, EkubMember[]> = {};
           pairs.forEach(([id, members]) => { map[id] = members; });
           setMembersByEkub(map);
+        })
+        .catch((err) => {
+          console.error('Failed to load member rosters:', err);
+          setActionError(err?.message || 'Failed to load member rosters.');
         })
         .finally(() => setLoadingMemberRoster(false));
     }
@@ -152,35 +168,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setActionError(err.message || 'Failed to remove member.');
     } finally {
       setProcessingMemberId(null);
-    }
-  };
-
-  // Invite a brand-new person to the platform (public self-registration has
-  // been removed -- this is now the only way a new account gets created).
-  const [showInviteForm, setShowInviteForm] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteFullName, setInviteFullName] = useState('');
-  const [invitePhone, setInvitePhone] = useState('');
-  const [invitingUser, setInvitingUser] = useState(false);
-  const [inviteResetLink, setInviteResetLink] = useState<string | null>(null);
-  const [inviteCopied, setInviteCopied] = useState(false);
-
-  const handleInviteMember = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inviteEmail.trim() || !inviteFullName.trim()) return;
-    setInvitingUser(true);
-    setActionError('');
-    setInviteResetLink(null);
-    try {
-      const { resetLink } = await inviteMember(inviteEmail.trim(), inviteFullName.trim(), invitePhone.trim());
-      setInviteResetLink(resetLink);
-      setInviteEmail('');
-      setInviteFullName('');
-      setInvitePhone('');
-    } catch (err: any) {
-      setActionError(err.message || 'Failed to invite member.');
-    } finally {
-      setInvitingUser(false);
     }
   };
 
@@ -310,6 +297,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
     if (!newUid) {
       setActionError('Please select or specify a valid User ID to assign as Admin.');
+      setTimeout(() => setActionError(''), 4000);
+      return;
+    }
+
+    if (newUid === userProfile?.uid) {
+      setActionError('The Super Admin cannot be assigned as an Ekub\u2019s Admin -- the Super Admin is never a member of any circle.');
       setTimeout(() => setActionError(''), 4000);
       return;
     }
@@ -462,196 +455,142 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       </div>
 
-      {/* Admin Tabs */}
-      <div className="flex border-b border-gray-200 overflow-x-auto space-x-2">
-        <button
-          onClick={() => setActiveTab('receipts')}
-          className={`pb-3 px-4 text-xs font-bold whitespace-nowrap border-b-2 flex items-center space-x-1.5 transition-all ${
-            activeTab === 'receipts'
-              ? 'border-[#7856FF] text-[#7856FF]'
-              : 'border-transparent text-gray-500 hover:text-gray-800'
-          }`}
-        >
-          <Receipt className="w-4 h-4" />
-          <span>Pending Bank Receipts ({pendingContributions.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('members')}
-          className={`pb-3 px-4 text-xs font-bold whitespace-nowrap border-b-2 flex items-center space-x-1.5 transition-all ${
-            activeTab === 'members'
-              ? 'border-[#7856FF] text-[#7856FF]'
-              : 'border-transparent text-gray-500 hover:text-gray-800'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          <span>Members</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('draws')}
-          className={`pb-3 px-4 text-xs font-bold whitespace-nowrap border-b-2 flex items-center space-x-1.5 transition-all ${
-            activeTab === 'draws'
-              ? 'border-[#7856FF] text-[#7856FF]'
-              : 'border-transparent text-gray-500 hover:text-gray-800'
-          }`}
-        >
-          <Sparkles className="w-4 h-4 text-[#7856FF]" />
-          <span>Live Draw Controller</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('payouts')}
-          className={`pb-3 px-4 text-xs font-bold whitespace-nowrap border-b-2 flex items-center space-x-1.5 transition-all ${
-            activeTab === 'payouts'
-              ? 'border-[#7856FF] text-[#7856FF]'
-              : 'border-transparent text-gray-500 hover:text-gray-800'
-          }`}
-        >
-          <Banknote className="w-4 h-4" />
-          <span>Payout Clearances ({pendingPayouts.length})</span>
-        </button>
-
-        {/* Super Admin Exclusive: Manage Ekub Admins */}
-        {isSuperAdmin && (
+      {/* Admin Tabs Navigation Bar */}
+      <div className="bg-[#F4F1FB] p-2 rounded-2xl border border-[#DCD5F3] shadow-xs">
+        <div className="flex items-center overflow-x-auto gap-2 py-0.5">
+          {/* Pending Bank Receipts */}
           <button
-            onClick={() => setActiveTab('manage_admins')}
-            className={`pb-3 px-4 text-xs font-bold whitespace-nowrap border-b-2 flex items-center space-x-1.5 transition-all ${
-              activeTab === 'manage_admins'
-                ? 'border-[#7856FF] text-[#7856FF]'
-                : 'border-transparent text-gray-500 hover:text-gray-800'
+            onClick={() => setActiveTab('receipts')}
+            className={`px-3.5 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap flex items-center space-x-2 transition-all cursor-pointer ${
+              activeTab === 'receipts'
+                ? 'bg-[#7856FF] text-white shadow-md shadow-[#7856FF]/25'
+                : 'bg-white text-gray-700 hover:text-gray-900 hover:bg-gray-50 border border-[#E6E1F5] shadow-xs'
             }`}
           >
-            <UserCheck className="w-4 h-4" />
-            <span>Manage Ekub Admins</span>
+            <Receipt className={`w-4 h-4 shrink-0 ${activeTab === 'receipts' ? 'text-white' : 'text-[#7856FF]'}`} />
+            <span>Pending Bank Receipts</span>
+            <span
+              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                activeTab === 'receipts'
+                  ? 'bg-white/20 text-white'
+                  : pendingContributions.length > 0
+                  ? 'bg-amber-100 text-amber-800'
+                  : 'bg-gray-100 text-gray-600'
+              }`}
+            >
+              {pendingContributions.length}
+            </span>
           </button>
-        )}
 
-        <button
-          onClick={() => setActiveTab('disputes')}
-          className={`pb-3 px-4 text-xs font-bold whitespace-nowrap border-b-2 flex items-center space-x-1.5 transition-all ${
-            activeTab === 'disputes'
-              ? 'border-[#7856FF] text-[#7856FF]'
-              : 'border-transparent text-gray-500 hover:text-gray-800'
-          }`}
-        >
-          <MessageSquare className="w-4 h-4" />
-          <span>Disputes & Tickets ({openTickets.length})</span>
-        </button>
-
-        {/* Audit tab: Super Admin only. The Firestore rule for auditLogs
-            depends on resource.data.ekubId with no matching query filter in
-            getAuditLogs() -- an unfiltered list query with a field-dependent
-            rule is rejected outright for anyone who isn't provably covered
-            by a document-independent branch (Super Admin is; Ekub Admin
-            isn't). Restricting this tab to Super Admin avoids that error
-            rather than hitting it. */}
-        {isSuperAdmin && (
+          {/* Members */}
           <button
-            onClick={() => setActiveTab('audit')}
-            className={`pb-3 px-4 text-xs font-bold whitespace-nowrap border-b-2 flex items-center space-x-1.5 transition-all ${
-              activeTab === 'audit'
-                ? 'border-[#7856FF] text-[#7856FF]'
-                : 'border-transparent text-gray-500 hover:text-gray-800'
+            onClick={() => setActiveTab('members')}
+            className={`px-3.5 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap flex items-center space-x-2 transition-all cursor-pointer ${
+              activeTab === 'members'
+                ? 'bg-[#7856FF] text-white shadow-md shadow-[#7856FF]/25'
+                : 'bg-white text-gray-700 hover:text-gray-900 hover:bg-gray-50 border border-[#E6E1F5] shadow-xs'
             }`}
           >
-            <FileText className="w-4 h-4" />
-            <span>Immutable Audit Logs</span>
+            <Users className={`w-4 h-4 shrink-0 ${activeTab === 'members' ? 'text-white' : 'text-[#7856FF]'}`} />
+            <span>Members</span>
           </button>
-        )}
+
+          {/* Live Draw Controller */}
+          <button
+            onClick={() => setActiveTab('draws')}
+            className={`px-3.5 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap flex items-center space-x-2 transition-all cursor-pointer ${
+              activeTab === 'draws'
+                ? 'bg-[#7856FF] text-white shadow-md shadow-[#7856FF]/25'
+                : 'bg-white text-gray-700 hover:text-gray-900 hover:bg-gray-50 border border-[#E6E1F5] shadow-xs'
+            }`}
+          >
+            <Sparkles className={`w-4 h-4 shrink-0 ${activeTab === 'draws' ? 'text-white' : 'text-[#7856FF]'}`} />
+            <span>Live Draw Controller</span>
+          </button>
+
+          {/* Payout Clearances */}
+          <button
+            onClick={() => setActiveTab('payouts')}
+            className={`px-3.5 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap flex items-center space-x-2 transition-all cursor-pointer ${
+              activeTab === 'payouts'
+                ? 'bg-[#7856FF] text-white shadow-md shadow-[#7856FF]/25'
+                : 'bg-white text-gray-700 hover:text-gray-900 hover:bg-gray-50 border border-[#E6E1F5] shadow-xs'
+            }`}
+          >
+            <Banknote className={`w-4 h-4 shrink-0 ${activeTab === 'payouts' ? 'text-white' : 'text-[#7856FF]'}`} />
+            <span>Payout Clearances</span>
+            <span
+              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                activeTab === 'payouts'
+                  ? 'bg-white/20 text-white'
+                  : pendingPayouts.length > 0
+                  ? 'bg-emerald-100 text-emerald-800'
+                  : 'bg-gray-100 text-gray-600'
+              }`}
+            >
+              {pendingPayouts.length}
+            </span>
+          </button>
+
+          {/* Super Admin Exclusive: Manage Ekub Admins */}
+          {isSuperAdmin && (
+            <button
+              onClick={() => setActiveTab('manage_admins')}
+              className={`px-3.5 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap flex items-center space-x-2 transition-all cursor-pointer ${
+                activeTab === 'manage_admins'
+                  ? 'bg-[#7856FF] text-white shadow-md shadow-[#7856FF]/25'
+                : 'bg-white text-gray-700 hover:text-gray-900 hover:bg-gray-50 border border-[#E6E1F5] shadow-xs'
+              }`}
+            >
+              <UserCheck className={`w-4 h-4 shrink-0 ${activeTab === 'manage_admins' ? 'text-white' : 'text-[#7856FF]'}`} />
+              <span>Manage Ekub Admins</span>
+            </button>
+          )}
+
+          {/* Disputes & Tickets */}
+          <button
+            onClick={() => setActiveTab('disputes')}
+            className={`px-3.5 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap flex items-center space-x-2 transition-all cursor-pointer ${
+              activeTab === 'disputes'
+                ? 'bg-[#7856FF] text-white shadow-md shadow-[#7856FF]/25'
+                : 'bg-white text-gray-700 hover:text-gray-900 hover:bg-gray-50 border border-[#E6E1F5] shadow-xs'
+            }`}
+          >
+            <MessageSquare className={`w-4 h-4 shrink-0 ${activeTab === 'disputes' ? 'text-white' : 'text-[#7856FF]'}`} />
+            <span>Disputes & Tickets</span>
+            <span
+              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                activeTab === 'disputes'
+                  ? 'bg-white/20 text-white'
+                  : openTickets.length > 0
+                  ? 'bg-rose-100 text-rose-800'
+                  : 'bg-gray-100 text-gray-600'
+              }`}
+            >
+              {openTickets.length}
+            </span>
+          </button>
+
+          {/* Audit tab: Super Admin only */}
+          {isSuperAdmin && (
+            <button
+              onClick={() => setActiveTab('audit')}
+              className={`px-3.5 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap flex items-center space-x-2 transition-all cursor-pointer ${
+                activeTab === 'audit'
+                  ? 'bg-[#7856FF] text-white shadow-md shadow-[#7856FF]/25'
+                  : 'bg-white text-gray-700 hover:text-gray-900 hover:bg-gray-50 border border-[#E6E1F5] shadow-xs'
+              }`}
+            >
+              <FileText className={`w-4 h-4 shrink-0 ${activeTab === 'audit' ? 'text-white' : 'text-[#7856FF]'}`} />
+              <span>Immutable Audit Logs</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* TAB: MEMBER MANAGEMENT -- pending requests + active roster */}
       {activeTab === 'members' && (
         <div className="bg-white rounded-2xl border border-[#E6E1F5] p-6 shadow-sm space-y-6">
-          {/* Invite a new person to the platform. Public self-registration
-              has been removed, so this is the only way a brand-new account
-              gets created. */}
-          <div className="border border-[#E6E1F5] rounded-xl overflow-hidden">
-            <button
-              onClick={() => { setShowInviteForm(!showInviteForm); setInviteResetLink(null); }}
-              className="w-full px-4 py-3 bg-[#F8F7FC] flex items-center justify-between text-sm font-bold text-[#1C1132]"
-            >
-              <span className="flex items-center space-x-2">
-                <UserPlus className="w-4 h-4 text-[#7856FF]" />
-                <span>Invite a New Person</span>
-              </span>
-              <ChevronRight className={`w-4 h-4 transition-transform ${showInviteForm ? 'rotate-90' : ''}`} />
-            </button>
-
-            {showInviteForm && (
-              <div className="p-4">
-                {inviteResetLink ? (
-                  <div className="space-y-3">
-                    <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-xs text-green-800">
-                      Account created. Share this one-time link with them so they can set their
-                      password and sign in -- it is not sent automatically.
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <input
-                        readOnly
-                        value={inviteResetLink}
-                        className="flex-1 p-2.5 text-[11px] font-mono border border-[#E6E1F5] rounded-lg bg-gray-50 truncate"
-                        onFocus={(e) => e.target.select()}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          navigator.clipboard.writeText(inviteResetLink);
-                          setInviteCopied(true);
-                          setTimeout(() => setInviteCopied(false), 2000);
-                        }}
-                        className="px-3 py-2.5 bg-[#7856FF] hover:bg-[#6340FF] text-white text-[10px] font-bold uppercase rounded-lg shrink-0"
-                      >
-                        {inviteCopied ? 'Copied!' : 'Copy'}
-                      </button>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setInviteResetLink(null)}
-                      className="text-[11px] font-bold text-[#7856FF] hover:underline"
-                    >
-                      Invite someone else
-                    </button>
-                  </div>
-                ) : (
-                  <form onSubmit={handleInviteMember} className="space-y-3">
-                    <input
-                      type="text"
-                      required
-                      value={inviteFullName}
-                      onChange={(e) => setInviteFullName(e.target.value)}
-                      placeholder="Full name"
-                      className="w-full p-2.5 text-xs border border-[#E6E1F5] rounded-lg outline-none focus:border-[#7856FF]"
-                    />
-                    <input
-                      type="email"
-                      required
-                      value={inviteEmail}
-                      onChange={(e) => setInviteEmail(e.target.value)}
-                      placeholder="Email address"
-                      className="w-full p-2.5 text-xs border border-[#E6E1F5] rounded-lg outline-none focus:border-[#7856FF]"
-                    />
-                    <input
-                      type="tel"
-                      value={invitePhone}
-                      onChange={(e) => setInvitePhone(e.target.value)}
-                      placeholder="Phone number (optional)"
-                      className="w-full p-2.5 text-xs border border-[#E6E1F5] rounded-lg outline-none focus:border-[#7856FF]"
-                    />
-                    <button
-                      type="submit"
-                      disabled={invitingUser}
-                      className="w-full py-2.5 bg-[#7856FF] hover:bg-[#6340FF] text-white text-xs font-bold uppercase rounded-lg disabled:opacity-50"
-                    >
-                      {invitingUser ? 'Sending Invite...' : 'Create Account & Get Invite Link'}
-                    </button>
-                  </form>
-                )}
-              </div>
-            )}
-          </div>
-
           {loadingMemberRoster ? (
             <div className="flex items-center justify-center py-12">
               <div className="w-8 h-8 border-3 border-[#7856FF] border-t-transparent animate-spin rounded-full" />

@@ -50,6 +50,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onNavigateTab,
 }) => {
   const { userProfile, isAdmin } = useAuth();
+
+  // Three real roles, not two: isAdmin (from useAuth) reflects Super Admin
+  // status ONLY. A person can also be the assigned admin of a specific
+  // Ekub without being Super Admin -- that's a distinct, real role ("Ekub
+  // Admin") that deserves its own label and its own Quick Action, rather
+  // than being lumped in with plain members.
+  const isEkubAdminOfAny = Boolean(userProfile?.uid && ekubs.some(e => e.adminId === userProfile.uid));
   const { t, language } = useTranslation();
 
   const activeEkub = (ekubs || []).find(e => e.status === 'active') || (ekubs || [])[0];
@@ -155,6 +162,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <span>{t.startEkub}</span>
                 <span className="text-[9px] bg-[#7856FF] px-1.5 py-0.5 rounded text-white font-bold uppercase">Admin</span>
               </button>
+            ) : isEkubAdminOfAny ? (
+              <button
+                onClick={() => onNavigateTab('admin')}
+                className="px-3.5 py-2.5 bg-transparent hover:bg-white/10 text-white font-bold text-xs uppercase tracking-widest border border-white/20 transition-all flex items-center space-x-1.5 rounded-lg"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-[#C4B5FD]" />
+                <span>Manage My Ekub</span>
+                <span className="text-[9px] bg-[#7856FF] px-1.5 py-0.5 rounded text-white font-bold uppercase">Ekub Admin</span>
+              </button>
             ) : (
               <button
                 onClick={onOpenJoinEkub}
@@ -250,6 +266,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 >
                   <Plus className="w-3.5 h-3.5 text-[#C4B5FD]" />
                   <span>Start New Ekub (Admin)</span>
+                </button>
+              ) : isEkubAdminOfAny ? (
+                <button
+                  onClick={() => onNavigateTab('admin')}
+                  className="w-full py-3 bg-white/10 border border-white/20 text-xs font-bold uppercase tracking-widest hover:bg-white/15 transition-colors rounded-lg flex items-center justify-center space-x-1.5"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-[#C4B5FD]" />
+                  <span>Manage My Ekub (Ekub Admin)</span>
                 </button>
               ) : (
                 <button

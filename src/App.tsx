@@ -214,6 +214,7 @@ function MainAppContent() {
         onOpenLegal={() => setShowLegal(true)}
         unreadCount={(notifications || []).filter(n => !n.read).length}
         hasAdminAccess={hasAdminAccess}
+        isEkubAdminOfAny={isEkubAdminOfAny}
       />
 
       {/* Main Content Area */}

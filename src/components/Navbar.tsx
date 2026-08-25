@@ -23,6 +23,7 @@ import { useAuth } from '../firebase/AuthContext';
 import { useTranslation } from '../locales/TranslationContext';
 import { AppNotification } from '../types';
 import { YegnaEkubLogo } from './YegnaEkubLogo';
+import { EditProfileModal } from './EditProfileModal';
 
 interface NavbarProps {
   currentTab?: string;
@@ -36,6 +37,7 @@ interface NavbarProps {
   onOpenJoinEkub?: () => void;
   onOpenLegal: () => void;
   hasAdminAccess?: boolean;
+  isEkubAdminOfAny?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -50,13 +52,21 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenJoinEkub,
   onOpenLegal,
   hasAdminAccess = false,
+  isEkubAdminOfAny = false,
 }) => {
   const currentTab = activeTabProp || currentTabProp || 'dashboard';
   const setCurrentTab = onNavigateProp || setCurrentTabProp || (() => {});
   const { userProfile, signOut, isAdmin } = useAuth();
+
+  // Three real roles, not two: isAdmin means Super Admin specifically.
+  // Someone can also be the assigned admin of a specific Ekub without
+  // being Super Admin -- that's "Ekub Admin," a distinct role that
+  // deserves its own label rather than being shown as a plain member.
+  const roleLabel = isAdmin ? 'Super Admin' : isEkubAdminOfAny ? 'Ekub Admin' : 'Verified Member';
   const { language, toggleLanguage, t } = useTranslation();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [showEditProfile, setShowEditProfile] = useState(false);
 
   const unreadCount = unreadCountProp !== undefined 
     ? unreadCountProp 
@@ -89,17 +99,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               }`}
             >
               {t.dashboard}
-            </button>
-
-            <button
-              onClick={() => setCurrentTab('my-ekubs')}
-              className={`transition-all py-1 ${
-                currentTab === 'my-ekubs'
-                  ? 'border-b-2 border-[#7856FF] text-[#C4B5FD] font-bold'
-                  : 'text-white/75 hover:text-white'
-              }`}
-            >
-              {t.myEkubs}
             </button>
 
             <button
@@ -213,7 +212,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     {userProfile?.fullName || 'Member'}
                   </span>
                   <span className="text-[9px] text-[#C4B5FD] font-bold tracking-wider uppercase">
-                    {isAdmin ? 'Super Admin' : 'Verified Member'}
+                    {roleLabel}
                   </span>
                 </div>
                 <ChevronDown className="w-3.5 h-3.5 text-white/60" />
@@ -230,11 +229,22 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <p className="font-bold text-gray-900 text-sm mt-0.5">{userProfile?.fullName}</p>
                     <p className="text-xs text-gray-600 truncate">{userProfile?.email}</p>
                     <span className="inline-block mt-1 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-sm bg-[#7856FF]/15 text-[#7856FF] border border-[#7856FF]/30">
-                      {isAdmin ? 'Super Admin' : 'Verified Member'}
+                      {roleLabel}
                     </span>
                   </div>
 
                   <div className="px-2 py-2 space-y-1">
+                    <button
+                      onClick={() => {
+                        setShowUserMenu(false);
+                        setShowEditProfile(true);
+                      }}
+                      className="w-full flex items-center space-x-2 px-3 py-2 rounded-sm text-xs text-gray-700 hover:bg-gray-100 transition-colors uppercase tracking-wider font-semibold text-[11px]"
+                    >
+                      <UserIcon className="w-3.5 h-3.5 text-[#7856FF]" />
+                      <span>Edit Profile</span>
+                    </button>
+
                     <button
                       onClick={() => {
                         setShowUserMenu(false);
@@ -283,16 +293,6 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <LayoutDashboard className="w-4 h-4" />
             <span>{t.dashboard}</span>
-          </button>
-
-          <button
-            onClick={() => { setCurrentTab('my-ekubs'); setMobileMenuOpen(false); }}
-            className={`w-full flex items-center space-x-2 px-3 py-2.5 rounded-sm ${
-              currentTab === 'my-ekubs' ? 'bg-[#7856FF]/20 text-[#C4B5FD] border-l-4 border-[#7856FF]' : 'text-white/80 hover:bg-white/5'
-            }`}
-          >
-            <Layers className="w-4 h-4" />
-            <span>{t.myEkubs}</span>
           </button>
 
           <button
@@ -356,6 +356,8 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
         </div>
       )}
+
+      {showEditProfile && <EditProfileModal onClose={() => setShowEditProfile(false)} />}
     </header>
   );
 };

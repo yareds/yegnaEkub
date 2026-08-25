@@ -81,7 +81,26 @@ export const createEkub = functions.https.onCall(async (data, context) => {
   }
 
   const ekubId = data.id || `ekub-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-  const adminUid = data.adminId || context.auth.uid;
+
+  // The Super Admin is never a member of any Ekub -- they manage the
+  // platform, not individual circles. adminId must be explicitly supplied
+  // (the UID of an existing, already-invited user) and must NOT be the
+  // Super Admin's own uid. Defaulting to the caller here was the exact bug
+  // that made every Super-Admin-created Ekub silently add them as its
+  // first member.
+  if (!data.adminId) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'adminId is required -- specify the UID of the existing user to assign as this Ekub\u2019s Admin.'
+    );
+  }
+  if (data.adminId === context.auth.uid) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'The Super Admin cannot be assigned as an Ekub\u2019s Admin -- the Super Admin is never a member of any circle. Assign a different, already-invited user.'
+    );
+  }
+  const adminUid = data.adminId;
   const adminName = data.adminName || 'Assigned Admin';
 
   const newEkub = {
@@ -166,6 +185,12 @@ export const assignEkubAdmin = functions.https.onCall(async (data, context) => {
   const { ekubId, newAdminUid, newAdminName } = data;
   if (!ekubId || !newAdminUid) {
     throw new functions.https.HttpsError('invalid-argument', 'ekubId and newAdminUid are required.');
+  }
+  if (newAdminUid === context.auth.uid) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'The Super Admin cannot be assigned as an Ekub\u2019s Admin -- the Super Admin is never a member of any circle. Assign a different, already-invited user.'
+    );
   }
 
   const ekubRef = db.collection('ekubs').doc(ekubId);
@@ -432,7 +457,18 @@ export const executeDraw = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError('invalid-argument', 'ekubId is required.');
   }
 
-  const { isSuper } = await checkIsEkubAdminOrSuperAdmin(context.auth.uid, ekubId, context.auth);
+  // The Super Admin does not run draws -- that is exclusively the assigned
+  // Ekub Admin's job for their own circle. checkIsEkubAdminOrSuperAdmin
+  // still confirms the Ekub exists and the caller is at least one of the
+  // two, but the extra isEkubAdm check below narrows this specific action
+  // to the Ekub Admin only, unlike every other admin action in this file.
+  const { isSuper, isEkubAdm } = await checkIsEkubAdminOrSuperAdmin(context.auth.uid, ekubId, context.auth);
+  if (!isEkubAdm) {
+    throw new functions.https.HttpsError(
+      'permission-denied',
+      'Only the assigned Ekub Admin can start a draw for this circle -- the Super Admin does not run draws.'
+    );
+  }
 
   const result = await db.runTransaction(async (transaction) => {
     const ekubRef = db.collection('ekubs').doc(ekubId);
@@ -825,8 +861,8 @@ export const removeEkubMember = functions.https.onCall(async (data, context) => 
 // users/{userId} create rule in firestore.rules). This is now the ONLY way
 // a new 'member' account gets created: it pre-creates the Firebase Auth
 // user (via the Admin SDK, which bypasses client-side rules) AND their
-// Firestore profile in one step, then returns a password-reset link the
-// inviting admin can share with the person directly (WhatsApp, SMS, email,
+// Firestore profile in one step, then returns a password-reset link or invite link
+// the inviting admin can share with the person directly (WhatsApp, SMS, email,
 // etc.) -- there is no automatic email-sending configured here.
 // ============================================================================
 export const inviteMember = functions.https.onCall(async (data, context) => {
@@ -838,6 +874,9 @@ export const inviteMember = functions.https.onCall(async (data, context) => {
   if (!email || !fullName) {
     throw new functions.https.HttpsError('invalid-argument', 'email and fullName are required.');
   }
+
+  const trimmedEmail = String(email).trim().toLowerCase();
+  const trimmedName = String(fullName).trim();
 
   const isSuper = await checkIsSuperAdmin(context.auth.uid, context.auth);
   let isAnyEkubAdmin = false;
@@ -852,35 +891,54 @@ export const inviteMember = functions.https.onCall(async (data, context) => {
     );
   }
 
-  let userRecord: admin.auth.UserRecord;
+  let userRecord: admin.auth.UserRecord | null = null;
   try {
-    userRecord = await admin.auth().getUserByEmail(email);
-    const existingProfile = await db.collection('users').doc(userRecord.uid).get();
-    if (existingProfile.exists) {
-      throw new functions.https.HttpsError('already-exists', 'A YegnaEkub account for this email already exists.');
-    }
-    // Auth account exists but has no Firestore profile yet (e.g. a prior
-    // partial invite) -- fall through and create the profile below.
+    userRecord = await admin.auth().getUserByEmail(trimmedEmail);
   } catch (err: any) {
-    if (err instanceof functions.https.HttpsError) {
-      throw err;
-    }
-    if (err.code === 'auth/user-not-found') {
-      userRecord = await admin.auth().createUser({
-        email,
-        displayName: fullName,
-        emailVerified: false,
-      });
+    if (err?.code === 'auth/user-not-found') {
+      try {
+        userRecord = await admin.auth().createUser({
+          email: trimmedEmail,
+          displayName: trimmedName,
+          emailVerified: false,
+        });
+      } catch (createErr: any) {
+        console.error('Failed to create auth user:', createErr);
+        if (createErr?.code === 'auth/email-already-exists') {
+          userRecord = await admin.auth().getUserByEmail(trimmedEmail);
+        } else {
+          throw new functions.https.HttpsError(
+            'invalid-argument',
+            createErr?.message || 'Failed to create user account with the provided email.'
+          );
+        }
+      }
     } else {
-      throw new functions.https.HttpsError('internal', 'Failed to look up or create the user account.');
+      console.error('Error looking up user by email:', err);
+      throw new functions.https.HttpsError(
+        'internal',
+        err?.message || 'Failed to look up user account.'
+      );
     }
+  }
+
+  if (!userRecord) {
+    throw new functions.https.HttpsError('internal', 'Unable to retrieve or create user record.');
+  }
+
+  const existingProfile = await db.collection('users').doc(userRecord.uid).get();
+  if (existingProfile.exists) {
+    throw new functions.https.HttpsError(
+      'already-exists',
+      `A YegnaEkub account for ${trimmedEmail} already exists.`
+    );
   }
 
   const newProfile = {
     uid: userRecord.uid,
-    fullName,
-    email,
-    phoneNumber: phoneNumber || '',
+    fullName: trimmedName,
+    email: trimmedEmail,
+    phoneNumber: phoneNumber ? String(phoneNumber).trim() : '',
     photoURL: '',
     role: 'member',
     preferredLanguage: 'en',
@@ -890,7 +948,13 @@ export const inviteMember = functions.https.onCall(async (data, context) => {
   };
   await db.collection('users').doc(userRecord.uid).set(newProfile);
 
-  const resetLink = await admin.auth().generatePasswordResetLink(email);
+  let resetLink = '';
+  try {
+    resetLink = await admin.auth().generatePasswordResetLink(trimmedEmail);
+  } catch (linkErr: any) {
+    console.warn('generatePasswordResetLink failed (email auth may be unconfigured in Firebase):', linkErr);
+    resetLink = `https://ais-dev-6qhunzlrcfdt7gvr3jhclb-118942989362.us-east1.run.app/?invited=${encodeURIComponent(trimmedEmail)}`;
+  }
 
   await writeAuditLog({
     actorId: context.auth.uid,
@@ -899,8 +963,8 @@ export const inviteMember = functions.https.onCall(async (data, context) => {
     action: 'MEMBER_INVITED',
     entityType: 'admin',
     entityId: userRecord.uid,
-    reason: `Invited ${email} to the platform`,
-    newState: { email, fullName },
+    reason: `Invited ${trimmedEmail} to the platform`,
+    newState: { email: trimmedEmail, fullName: trimmedName },
   });
 
   return { success: true, uid: userRecord.uid, resetLink };

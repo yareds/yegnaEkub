@@ -48,9 +48,15 @@ export const EkubDetail: React.FC<EkubDetailProps> = ({
   useEffect(() => {
     const load = async () => {
       setLoadingMembers(true);
-      const res = await getEkubMembers(ekub.id);
-      setMembers(Array.isArray(res) ? res : []);
-      setLoadingMembers(false);
+      try {
+        const res = await getEkubMembers(ekub.id);
+        setMembers(Array.isArray(res) ? res : []);
+      } catch (err) {
+        console.error(`Failed to load members for ${ekub.id}:`, err);
+        setMembers([]);
+      } finally {
+        setLoadingMembers(false);
+      }
     };
     load();
   }, [ekub.id]);

@@ -7,10 +7,10 @@ import {
   Coins, 
   CheckCircle2, 
   AlertCircle, 
-  RotateCw, 
-  Copy, 
-  Check, 
-  UserCheck 
+  RotateCw,
+  Copy,
+  Check,
+  UserCheck
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useAuth } from '../firebase/AuthContext';
@@ -36,9 +36,11 @@ export const LiveDrawModal: React.FC<LiveDrawModalProps> = ({
 
   // isAdmin (from useAuth) reflects Super Admin status only -- it does NOT
   // know about per-Ekub admin assignment. A member should only ever be
-  // able to WATCH a draw; only the Super Admin or the specific Ekub Admin
-  // assigned to THIS Ekub should be able to launch it.
-  const canExecuteDraw = isAdmin || ekub.adminId === userProfile?.uid;
+  // able to WATCH a draw; only the specific Ekub Admin assigned to THIS
+  // Ekub should be able to launch it. Note: Super Admin is deliberately
+  // NOT included here -- the Super Admin does not run draws, that is
+  // exclusively the assigned Ekub Admin's job for their own circle.
+  const canExecuteDraw = ekub.adminId === userProfile?.uid;
 
   const [members, setMembers] = useState<EkubMember[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(true);
@@ -65,12 +67,18 @@ export const LiveDrawModal: React.FC<LiveDrawModalProps> = ({
   useEffect(() => {
     const fetchEligible = async () => {
       setLoadingMembers(true);
-      const all = await getEkubMembers(ekub.id);
-      const safeAll = Array.isArray(all) ? all : [];
-      // Eligible members: have paid and haven't received payout yet
-      const eligible = safeAll.filter(m => !m.hasReceivedPayout && (m.eligibleForDraw || m.contributionStatus === 'paid'));
-      setMembers(eligible.length > 0 ? eligible : safeAll.filter(m => !m.hasReceivedPayout));
-      setLoadingMembers(false);
+      try {
+        const all = await getEkubMembers(ekub.id);
+        const safeAll = Array.isArray(all) ? all : [];
+        // Eligible members: have paid and haven't received payout yet
+        const eligible = safeAll.filter(m => !m.hasReceivedPayout && (m.eligibleForDraw || m.contributionStatus === 'paid'));
+        setMembers(eligible.length > 0 ? eligible : safeAll.filter(m => !m.hasReceivedPayout));
+      } catch (err) {
+        console.error(`Failed to load members for ${ekub.id}:`, err);
+        setMembers([]);
+      } finally {
+        setLoadingMembers(false);
+      }
     };
     fetchEligible();
   }, [ekub.id]);

@@ -122,12 +122,24 @@ service cloud.firestore {
 
       // --- Members Subcollection ---
       match /members/{memberId} {
-        // A user can always read their own member doc regardless of status
-        // (pending or active) -- so someone with a pending request can see
-        // that it's pending. isEkubMember() now requires status=='active',
-        // so it would otherwise wrongly hide a pending requester's own doc
-        // from themselves.
-        allow read: if isSuperAdmin() || isEkubAdmin(ekubId) || isOwner(memberId);
+        // isOwner(memberId) alone is NOT enough for the common case of
+        // "list every member of my Ekub" (getEkubMembers() runs an
+        // unfiltered query over the whole subcollection): Firestore
+        // rejects a list query outright unless the rule can be proven
+        // true for every possible result without inspecting each
+        // document individually, and isOwner(memberId) only matches ONE
+        // document (the caller's own) out of the whole collection. That
+        // was the "Missing or insufficient permissions" error every
+        // regular member hit when viewing their own Ekub's roster.
+        // isEkubMember(ekubId) fixes this: it depends only on the fixed
+        // ekubId and the caller's own uid, not on which document is being
+        // evaluated, so it's provably true (or false) for the ENTIRE
+        // collection at once -- exactly what a list query needs. The
+        // isOwner(memberId) branch stays too, so a user with a still-
+        // PENDING request (for whom isEkubMember is false, since it
+        // requires status=='active') can still read their own single
+        // document to check their request status.
+        allow read: if isSuperAdmin() || isEkubAdmin(ekubId) || isEkubMember(ekubId) || isOwner(memberId);
 
         // Members can't add themselves as an active member directly --
         // regular joining happens via the addEkubMember Cloud Function

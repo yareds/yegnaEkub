@@ -35,6 +35,13 @@ export const CreateEkubModal: React.FC<CreateEkubModalProps> = ({
   const [contributionAmount, setContributionAmount] = useState<number>(5000);
   const [memberLimit, setMemberLimit] = useState<number>(10);
   const [rules, setRules] = useState('All members must transfer contributions within 24h of cycle opening. Payout is drawn using provably fair HMAC-SHA256 randomness.');
+  // The Super Admin is never a member of any Ekub -- an existing,
+  // already-invited user's UID must be explicitly assigned as this
+  // circle's Admin. There is no default; leaving this blank (or entering
+  // the Super Admin's own UID) is rejected both here and by the
+  // createEkub Cloud Function itself.
+  const [assignedAdminUid, setAssignedAdminUid] = useState('');
+  const [assignedAdminName, setAssignedAdminName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -63,6 +70,16 @@ export const CreateEkubModal: React.FC<CreateEkubModalProps> = ({
       return;
     }
 
+    if (!assignedAdminUid.trim() || !assignedAdminName.trim()) {
+      setError('You must assign an existing, already-invited user as this circle\u2019s Admin. The Super Admin cannot administer a circle themselves.');
+      return;
+    }
+
+    if (assignedAdminUid.trim() === userProfile?.uid) {
+      setError('The Super Admin cannot be assigned as this circle\u2019s Admin -- pick a different, already-invited user.');
+      return;
+    }
+
     setSubmitting(true);
     setError('');
 
@@ -81,10 +98,10 @@ export const CreateEkubModal: React.FC<CreateEkubModalProps> = ({
         memberLimit,
         payoutAmount,
         totalCycles: memberLimit,
-        adminId: userProfile?.uid || 'user-admin',
-        adminName: userProfile?.fullName || 'Super Admin',
-        organizerId: userProfile?.uid || 'user-admin',
-        organizerName: userProfile?.fullName || 'Super Admin',
+        adminId: assignedAdminUid.trim(),
+        adminName: assignedAdminName.trim(),
+        organizerId: assignedAdminUid.trim(),
+        organizerName: assignedAdminName.trim(),
         startDate: today,
         nextContributionDate: nextWeek.split('T')[0],
         nextDrawDate: nextWeek,
@@ -262,6 +279,44 @@ export const CreateEkubModal: React.FC<CreateEkubModalProps> = ({
               />
             </div>
 
+            <div className="p-3.5 bg-[#7856FF]/5 border border-[#7856FF]/20 rounded-xl space-y-3">
+              <p className="text-[11px] text-[#7856FF] font-bold flex items-center space-x-1.5">
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Assign Ekub Admin</span>
+              </p>
+              <p className="text-[10px] text-gray-500 -mt-2">
+                The Super Admin is never a member of any circle. Assign an existing,
+                already-invited user's UID to administer this Ekub -- invite them first
+                from the Members tab if they don't have an account yet.
+              </p>
+              <div>
+                <label className="block font-bold text-[10px] text-gray-700 uppercase tracking-wider mb-1">
+                  Admin Full Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={assignedAdminName}
+                  onChange={(e) => setAssignedAdminName(e.target.value)}
+                  placeholder="e.g. Abebe Kebede"
+                  className="w-full p-2.5 border border-[#E6E1F5] rounded-xl outline-none focus:border-[#7856FF] bg-white"
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-[10px] text-gray-700 uppercase tracking-wider mb-1">
+                  Admin Firebase UID <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={assignedAdminUid}
+                  onChange={(e) => setAssignedAdminUid(e.target.value)}
+                  placeholder="Paste the UID from their invite link"
+                  className="w-full p-2.5 border border-[#E6E1F5] rounded-xl outline-none focus:border-[#7856FF] font-mono text-xs bg-white"
+                />
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block font-bold text-[10px] text-gray-700 uppercase tracking-wider mb-1">
@@ -369,4 +424,3 @@ export const CreateEkubModal: React.FC<CreateEkubModalProps> = ({
     </div>
   );
 };
-
