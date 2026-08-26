@@ -64,6 +64,10 @@ service cloud.firestore {
       // so this stays informational/display-only.
       allow read: if isAuthenticated();
 
+      // A user may only create their OWN profile, and it must start as
+      // 'member' -- UNLESS they already qualify as Super Admin by custom
+      // claim / bootstrap email (checked independently of this document),
+      // in which case their own first-login profile may say so.
       // Public self-registration has been removed. A user may create their
       // OWN profile ONLY if they already independently qualify as Super
       // Admin (the bootstrap email/claim case) -- this is not a loophole,

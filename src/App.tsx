@@ -5,6 +5,7 @@ import { Navbar } from './components/Navbar';
 import { MobileNav } from './components/MobileNav';
 import { LandingPage } from './components/LandingPage';
 import { Dashboard } from './components/Dashboard';
+import { SuperAdminDashboard } from './components/SuperAdminDashboard';
 import { EkubDetail } from './components/EkubDetail';
 import { DiscoverView } from './components/DiscoverView';
 import { ContributionsView } from './components/ContributionsView';
@@ -272,20 +273,29 @@ function MainAppContent() {
             )}
 
             {activeTab === 'dashboard' && (
-              <Dashboard
-                ekubs={ekubs}
-                contributions={contributions}
-                draws={draws}
-                payouts={payouts}
-                onSelectEkub={handleSelectEkub}
-                onOpenContribute={(e) => setContributeEkub(e || ekubs[0])}
-                onOpenLiveDraw={(e) => setLiveDrawEkub(e || ekubs[0])}
-                onOpenVerifyDraw={(d) => setVerifyDrawTarget(d || draws[0])}
-                onOpenPayout={(p) => setPayoutClaimTarget(p || payouts[0])}
-                onOpenCreateEkub={() => setShowCreateEkub(true)}
-                onOpenJoinEkub={() => setShowJoinEkub(true)}
-                onNavigateTab={handleNavigate}
-              />
+              isSuperAdmin ? (
+                <SuperAdminDashboard
+                  ekubs={ekubs}
+                  onSelectEkub={handleSelectEkub}
+                  onOpenCreateEkub={() => setShowCreateEkub(true)}
+                  onNavigateTab={handleNavigate}
+                />
+              ) : (
+                <Dashboard
+                  ekubs={ekubs}
+                  contributions={contributions}
+                  draws={draws}
+                  payouts={payouts}
+                  onSelectEkub={handleSelectEkub}
+                  onOpenContribute={(e) => setContributeEkub(e || ekubs[0])}
+                  onOpenLiveDraw={(e) => setLiveDrawEkub(e || ekubs[0])}
+                  onOpenVerifyDraw={(d) => setVerifyDrawTarget(d || draws[0])}
+                  onOpenPayout={(p) => setPayoutClaimTarget(p || payouts[0])}
+                  onOpenCreateEkub={() => setShowCreateEkub(true)}
+                  onOpenJoinEkub={() => setShowJoinEkub(true)}
+                  onNavigateTab={handleNavigate}
+                />
+              )
             )}
 
             {activeTab === 'discover' && (

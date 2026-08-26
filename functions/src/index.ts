@@ -567,7 +567,7 @@ export const executeDraw = functions.https.onCall(async (data, context) => {
       eligibleCount: eligibleMembers.length,
       winningIndex,
       winnerId: winner.userId || winner.id,
-      winnerName: winner.displayName || winner.name || 'Anonymous Member',
+      winnerName: winner.displayName || winner.name,
       payoutAmount,
       explanation: `Index calculated by (parseInt(HMAC_SHA256(serverSeed, "${clientSeed}:${nonce}:${cycleNumber}")[0..12], 16) % ${eligibleMembers.length}) = ${winningIndex}`,
       timestamp: new Date().toISOString(),

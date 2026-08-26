@@ -202,32 +202,15 @@ export const removeEkubMember = async (ekubId: string, userId: string): Promise<
 
 // Invite a brand-new person to the platform. Public self-registration has
 // been removed -- this is now the only way a 'member' account gets
-// created. Returns a password-reset link or onboarding link the inviting admin can share
+// created. Returns a password-reset link the inviting admin can share
 // directly (no automatic email is sent).
 export const inviteMember = async (email: string, fullName: string, phoneNumber?: string): Promise<{ uid: string; resetLink: string }> => {
-  const trimmedEmail = email.trim().toLowerCase();
-  const trimmedName = fullName.trim();
-  const trimmedPhone = phoneNumber?.trim() || '';
-
   try {
-    const res = await inviteMemberCallable({ email: trimmedEmail, fullName: trimmedName, phoneNumber: trimmedPhone });
+    const res = await inviteMemberCallable({ email, fullName, phoneNumber });
     return { uid: res.data.uid, resetLink: res.data.resetLink };
   } catch (err: any) {
     console.error('inviteMember failed:', err);
-    const rawMsg = (err?.message || err?.details || String(err)).toLowerCase();
-    if (rawMsg.includes('already-exists') || rawMsg.includes('already exists')) {
-      throw new Error(`A YegnaEkub account for ${trimmedEmail} already exists.`);
-    }
-    if (rawMsg.includes('permission-denied') || rawMsg.includes('permission')) {
-      throw new Error('Only the Super Admin or an Ekub Admin can invite new members.');
-    }
-    if (rawMsg.includes('invalid-argument') || rawMsg.includes('invalid email')) {
-      throw new Error('Please provide a valid email address and full name.');
-    }
-    if (rawMsg.includes('internal') || rawMsg.includes('internal [0]')) {
-      throw new Error('Server encountered an error while creating the member invite. Please verify the email address and try again.');
-    }
-    throw new Error(err?.message || 'Failed to invite member. Please check details and try again.');
+    throw new Error(err?.message || 'Failed to invite member.');
   }
 };
 
