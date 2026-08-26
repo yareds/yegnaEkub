@@ -123,7 +123,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div>
             <div className="inline-flex items-center space-x-1.5 px-3 py-1 bg-[#7856FF]/20 border border-[#7856FF]/40 text-[#C4B5FD] text-[10px] font-bold uppercase tracking-[0.2em] mb-2 rounded-full">
               <ShieldCheck className="w-3.5 h-3.5 text-[#7856FF]" />
-              <span>{userProfile?.role === 'admin' ? 'SUPER ADMIN VERIFIED' : 'VERIFIED MEMBER'}</span>
+              <span>{isAdmin ? 'SUPER ADMIN VERIFIED' : isEkubAdminOfAny ? 'EKUB ADMIN VERIFIED' : 'VERIFIED MEMBER'}</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
               {language === 'am' ? `እንኳን ደህና መጡ፣ ${userProfile?.fullName || ''}` : `Welcome back, ${userProfile?.fullName || 'Member'}`}
@@ -137,21 +137,30 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
           {/* Action Buttons */}
           <div className="flex flex-wrap gap-2.5">
-            <button
-              onClick={() => onOpenContribute(activeEkub)}
-              className="px-4 py-2.5 bg-[#7856FF] hover:bg-[#6340FF] text-white font-bold text-xs uppercase tracking-widest shadow-md shadow-[#7856FF]/25 transition-all flex items-center space-x-1.5 rounded-lg"
-            >
-              <Receipt className="w-4 h-4" />
-              <span>{t.payContribution}</span>
-            </button>
+            {/* Super Admin is never a member of any Ekub -- there is
+                nothing for them to contribute to or watch here. This
+                Dashboard shouldn't normally even render for them (App.tsx
+                redirects Super Admin straight to the Admin Center), but
+                this stays as a second layer of defense regardless. */}
+            {!isAdmin && (
+              <>
+                <button
+                  onClick={() => onOpenContribute(activeEkub)}
+                  className="px-4 py-2.5 bg-[#7856FF] hover:bg-[#6340FF] text-white font-bold text-xs uppercase tracking-widest shadow-md shadow-[#7856FF]/25 transition-all flex items-center space-x-1.5 rounded-lg"
+                >
+                  <Receipt className="w-4 h-4" />
+                  <span>{t.payContribution}</span>
+                </button>
 
-            <button
-              onClick={() => onOpenLiveDraw(activeEkub)}
-              className="px-4 py-2.5 bg-white/10 hover:bg-white/15 text-[#C4B5FD] border border-[#7856FF]/40 font-bold text-xs uppercase tracking-widest transition-all flex items-center space-x-1.5 rounded-lg"
-            >
-              <Sparkles className="w-4 h-4 text-[#7856FF]" />
-              <span>{t.joinDraw}</span>
-            </button>
+                <button
+                  onClick={() => onOpenLiveDraw(activeEkub)}
+                  className="px-4 py-2.5 bg-white/10 hover:bg-white/15 text-[#C4B5FD] border border-[#7856FF]/40 font-bold text-xs uppercase tracking-widest transition-all flex items-center space-x-1.5 rounded-lg"
+                >
+                  <Sparkles className="w-4 h-4 text-[#7856FF]" />
+                  <span>{t.joinDraw}</span>
+                </button>
+              </>
+            )}
 
             {isAdmin ? (
               <button
@@ -253,12 +262,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <h2 className="text-[10px] uppercase tracking-[0.2em] text-[#C4B5FD] font-bold mb-4">
                 Quick Actions
               </h2>
-              <button
-                onClick={() => onOpenContribute(activeEkub)}
-                className="w-full py-3 mb-3 bg-[#7856FF] text-white text-xs font-bold uppercase tracking-widest hover:bg-[#6340FF] shadow-sm transition-colors rounded-lg"
-              >
-                Make Contribution
-              </button>
+              {/* Super Admin is never a member of any Ekub -- nothing to
+                  contribute to. */}
+              {!isAdmin && (
+                <button
+                  onClick={() => onOpenContribute(activeEkub)}
+                  className="w-full py-3 mb-3 bg-[#7856FF] text-white text-xs font-bold uppercase tracking-widest hover:bg-[#6340FF] shadow-sm transition-colors rounded-lg"
+                >
+                  Make Contribution
+                </button>
+              )}
               {isAdmin ? (
                 <button
                   onClick={onOpenCreateEkub}

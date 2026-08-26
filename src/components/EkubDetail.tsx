@@ -120,13 +120,19 @@ export const EkubDetail: React.FC<EkubDetailProps> = ({
 
           {/* Action CTAs */}
           <div className="flex flex-wrap gap-3">
-            <button
-              onClick={() => onOpenContribute(ekub)}
-              className="px-5 py-3 bg-[#7856FF] hover:bg-[#6340FF] text-white rounded-xl font-bold text-xs uppercase tracking-widest shadow-md active:scale-98 transition-all flex items-center space-x-2"
-            >
-              <Receipt className="w-4 h-4 text-white" />
-              <span>{t.payContribution}</span>
-            </button>
+            {/* Contributing requires actually being a member of THIS Ekub --
+                the Super Admin never is, and even an Ekub Admin of a
+                DIFFERENT circle browsing this one for oversight isn't a
+                member here either. */}
+            {userMemberRecord && (
+              <button
+                onClick={() => onOpenContribute(ekub)}
+                className="px-5 py-3 bg-[#7856FF] hover:bg-[#6340FF] text-white rounded-xl font-bold text-xs uppercase tracking-widest shadow-md active:scale-98 transition-all flex items-center space-x-2"
+              >
+                <Receipt className="w-4 h-4 text-white" />
+                <span>{t.payContribution}</span>
+              </button>
+            )}
 
             <button
               onClick={() => onOpenLiveDraw(ekub)}

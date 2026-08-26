@@ -7,9 +7,13 @@ interface MobileNavProps {
   onNavigate: (tab: string) => void;
   unreadCount?: number;
   hasAdminAccess?: boolean;
+  /** The Super Admin is never a member of any Ekub, so Discover/
+   *  Contributions/Draws/Payouts (all member-facing personal views) don't
+   *  apply to them -- their equivalents live in the Admin Center instead. */
+  isSuperAdmin?: boolean;
 }
 
-export const MobileNav: React.FC<MobileNavProps> = ({ activeTab, onNavigate, hasAdminAccess }) => {
+export const MobileNav: React.FC<MobileNavProps> = ({ activeTab, onNavigate, hasAdminAccess, isSuperAdmin }) => {
   const { t, language } = useTranslation();
 
   return (
@@ -27,57 +31,61 @@ export const MobileNav: React.FC<MobileNavProps> = ({ activeTab, onNavigate, has
         )}
       </button>
 
-      <button
-        onClick={() => onNavigate('discover')}
-        className={`flex flex-col items-center py-1 px-2.5 transition-colors relative ${
-          activeTab === 'discover' ? 'text-[#7856FF] font-bold' : 'text-gray-400 hover:text-gray-800'
-        }`}
-      >
-        <Layers className={`w-5 h-5 ${activeTab === 'discover' ? 'stroke-[2.5]' : 'stroke-[1.75]'}`} />
-        <span className="text-[9px] uppercase tracking-wider mt-0.5">{language === 'am' ? 'ዕቁብ' : 'Ekubs'}</span>
-        {activeTab === 'discover' && (
-          <div className="w-1 h-1 bg-[#7856FF] rounded-full mt-0.5" />
-        )}
-      </button>
+      {!isSuperAdmin && (
+        <>
+          <button
+            onClick={() => onNavigate('discover')}
+            className={`flex flex-col items-center py-1 px-2.5 transition-colors relative ${
+              activeTab === 'discover' ? 'text-[#7856FF] font-bold' : 'text-gray-400 hover:text-gray-800'
+            }`}
+          >
+            <Layers className={`w-5 h-5 ${activeTab === 'discover' ? 'stroke-[2.5]' : 'stroke-[1.75]'}`} />
+            <span className="text-[9px] uppercase tracking-wider mt-0.5">{language === 'am' ? 'ዕቁብ' : 'Ekubs'}</span>
+            {activeTab === 'discover' && (
+              <div className="w-1 h-1 bg-[#7856FF] rounded-full mt-0.5" />
+            )}
+          </button>
 
-      <button
-        onClick={() => onNavigate('contributions')}
-        className={`flex flex-col items-center py-1 px-2.5 transition-colors relative ${
-          activeTab === 'contributions' ? 'text-[#7856FF] font-bold' : 'text-gray-400 hover:text-gray-800'
-        }`}
-      >
-        <Receipt className={`w-5 h-5 ${activeTab === 'contributions' ? 'stroke-[2.5]' : 'stroke-[1.75]'}`} />
-        <span className="text-[9px] uppercase tracking-wider mt-0.5">{language === 'am' ? 'መዋጮ' : 'Pay'}</span>
-        {activeTab === 'contributions' && (
-          <div className="w-1 h-1 bg-[#7856FF] rounded-full mt-0.5" />
-        )}
-      </button>
+          <button
+            onClick={() => onNavigate('contributions')}
+            className={`flex flex-col items-center py-1 px-2.5 transition-colors relative ${
+              activeTab === 'contributions' ? 'text-[#7856FF] font-bold' : 'text-gray-400 hover:text-gray-800'
+            }`}
+          >
+            <Receipt className={`w-5 h-5 ${activeTab === 'contributions' ? 'stroke-[2.5]' : 'stroke-[1.75]'}`} />
+            <span className="text-[9px] uppercase tracking-wider mt-0.5">{language === 'am' ? 'መዋጮ' : 'Pay'}</span>
+            {activeTab === 'contributions' && (
+              <div className="w-1 h-1 bg-[#7856FF] rounded-full mt-0.5" />
+            )}
+          </button>
 
-      <button
-        onClick={() => onNavigate('draws')}
-        className={`flex flex-col items-center py-1 px-2.5 transition-colors relative ${
-          activeTab === 'draws' ? 'text-[#7856FF] font-bold' : 'text-gray-400 hover:text-gray-800'
-        }`}
-      >
-        <Sparkles className={`w-5 h-5 text-[#7856FF] ${activeTab === 'draws' ? 'stroke-[2.5]' : 'stroke-[1.75]'}`} />
-        <span className="text-[9px] uppercase tracking-wider mt-0.5">{language === 'am' ? 'ዕጣ' : 'Draws'}</span>
-        {activeTab === 'draws' && (
-          <div className="w-1 h-1 bg-[#7856FF] rounded-full mt-0.5" />
-        )}
-      </button>
+          <button
+            onClick={() => onNavigate('draws')}
+            className={`flex flex-col items-center py-1 px-2.5 transition-colors relative ${
+              activeTab === 'draws' ? 'text-[#7856FF] font-bold' : 'text-gray-400 hover:text-gray-800'
+            }`}
+          >
+            <Sparkles className={`w-5 h-5 text-[#7856FF] ${activeTab === 'draws' ? 'stroke-[2.5]' : 'stroke-[1.75]'}`} />
+            <span className="text-[9px] uppercase tracking-wider mt-0.5">{language === 'am' ? 'ዕጣ' : 'Draws'}</span>
+            {activeTab === 'draws' && (
+              <div className="w-1 h-1 bg-[#7856FF] rounded-full mt-0.5" />
+            )}
+          </button>
 
-      <button
-        onClick={() => onNavigate('payouts')}
-        className={`flex flex-col items-center py-1 px-2.5 transition-colors relative ${
-          activeTab === 'payouts' ? 'text-[#7856FF] font-bold' : 'text-gray-400 hover:text-gray-800'
-        }`}
-      >
-        <Banknote className={`w-5 h-5 ${activeTab === 'payouts' ? 'stroke-[2.5]' : 'stroke-[1.75]'}`} />
-        <span className="text-[9px] uppercase tracking-wider mt-0.5">{language === 'am' ? 'ድረሻ' : 'Payouts'}</span>
-        {activeTab === 'payouts' && (
-          <div className="w-1 h-1 bg-[#7856FF] rounded-full mt-0.5" />
-        )}
-      </button>
+          <button
+            onClick={() => onNavigate('payouts')}
+            className={`flex flex-col items-center py-1 px-2.5 transition-colors relative ${
+              activeTab === 'payouts' ? 'text-[#7856FF] font-bold' : 'text-gray-400 hover:text-gray-800'
+            }`}
+          >
+            <Banknote className={`w-5 h-5 ${activeTab === 'payouts' ? 'stroke-[2.5]' : 'stroke-[1.75]'}`} />
+            <span className="text-[9px] uppercase tracking-wider mt-0.5">{language === 'am' ? 'ድረሻ' : 'Payouts'}</span>
+            {activeTab === 'payouts' && (
+              <div className="w-1 h-1 bg-[#7856FF] rounded-full mt-0.5" />
+            )}
+          </button>
+        </>
+      )}
 
       {hasAdminAccess && (
         <button

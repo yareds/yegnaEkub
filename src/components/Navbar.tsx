@@ -10,7 +10,6 @@ import {
   ShieldCheck, 
   HelpCircle, 
   Bell, 
-  User as UserIcon, 
   Globe, 
   ChevronDown, 
   LogOut, 
@@ -23,7 +22,6 @@ import { useAuth } from '../firebase/AuthContext';
 import { useTranslation } from '../locales/TranslationContext';
 import { AppNotification } from '../types';
 import { YegnaEkubLogo } from './YegnaEkubLogo';
-import { EditProfileModal } from './EditProfileModal';
 
 interface NavbarProps {
   currentTab?: string;
@@ -63,10 +61,14 @@ export const Navbar: React.FC<NavbarProps> = ({
   // being Super Admin -- that's "Ekub Admin," a distinct role that
   // deserves its own label rather than being shown as a plain member.
   const roleLabel = isAdmin ? 'Super Admin' : isEkubAdminOfAny ? 'Ekub Admin' : 'Verified Member';
+
+  // The Super Admin's "home" is the Admin Center, not the member-facing
+  // Dashboard -- they're never a member of any Ekub, so there's nothing
+  // personal to show them there.
+  const homeTab = isAdmin ? 'admin' : 'dashboard';
   const { language, toggleLanguage, t } = useTranslation();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [showEditProfile, setShowEditProfile] = useState(false);
 
   const unreadCount = unreadCountProp !== undefined 
     ? unreadCountProp 
@@ -78,7 +80,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         <div className="flex items-center justify-between h-full">
           
           {/* Refined Brand Logo with Creative Growth 'k' */}
-          <div className="flex items-center cursor-pointer" onClick={() => setCurrentTab('dashboard')}>
+          <div className="flex items-center cursor-pointer" onClick={() => setCurrentTab(homeTab)}>
             <YegnaEkubLogo
               variant="full"
               size="sm"
@@ -90,61 +92,75 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Desktop Navigation Links */}
           <nav className="hidden lg:flex items-center space-x-6 text-xs font-semibold uppercase tracking-widest">
-            <button
-              onClick={() => setCurrentTab('dashboard')}
-              className={`transition-all py-1 ${
-                currentTab === 'dashboard'
-                  ? 'border-b-2 border-[#7856FF] text-[#C4B5FD] font-bold'
-                  : 'text-white/75 hover:text-white'
-              }`}
-            >
-              {t.dashboard}
-            </button>
+            {/* The Super Admin's landing view is the Admin Center (below),
+                not this member-facing Dashboard -- hide the separate link
+                for them so there's no route back into member-only content. */}
+            {!isAdmin && (
+              <button
+                onClick={() => setCurrentTab('dashboard')}
+                className={`transition-all py-1 ${
+                  currentTab === 'dashboard'
+                    ? 'border-b-2 border-[#7856FF] text-[#C4B5FD] font-bold'
+                    : 'text-white/75 hover:text-white'
+                }`}
+              >
+                {t.dashboard}
+              </button>
+            )}
 
-            <button
-              onClick={() => setCurrentTab('discover')}
-              className={`transition-all py-1 ${
-                currentTab === 'discover'
-                  ? 'border-b-2 border-[#7856FF] text-[#C4B5FD] font-bold'
-                  : 'text-white/75 hover:text-white'
-              }`}
-            >
-              {t.discover}
-            </button>
+            {/* Discover / Contributions / Draws / Payouts are member-facing
+                personal views (find a circle, my ledger, watch a draw, my
+                payouts). The Super Admin is never a member of any circle,
+                so none of these apply to them -- their equivalent views
+                live inside the Admin Center's platform-wide tabs instead. */}
+            {!isAdmin && (
+              <>
+                <button
+                  onClick={() => setCurrentTab('discover')}
+                  className={`transition-all py-1 ${
+                    currentTab === 'discover'
+                      ? 'border-b-2 border-[#7856FF] text-[#C4B5FD] font-bold'
+                      : 'text-white/75 hover:text-white'
+                  }`}
+                >
+                  {t.discover}
+                </button>
 
-            <button
-              onClick={() => setCurrentTab('contributions')}
-              className={`transition-all py-1 ${
-                currentTab === 'contributions'
-                  ? 'border-b-2 border-[#7856FF] text-[#C4B5FD] font-bold'
-                  : 'text-white/75 hover:text-white'
-              }`}
-            >
-              {t.contributions}
-            </button>
+                <button
+                  onClick={() => setCurrentTab('contributions')}
+                  className={`transition-all py-1 ${
+                    currentTab === 'contributions'
+                      ? 'border-b-2 border-[#7856FF] text-[#C4B5FD] font-bold'
+                      : 'text-white/75 hover:text-white'
+                  }`}
+                >
+                  {t.contributions}
+                </button>
 
-            <button
-              onClick={() => setCurrentTab('draws')}
-              className={`transition-all py-1 flex items-center space-x-1 ${
-                currentTab === 'draws'
-                  ? 'border-b-2 border-[#7856FF] text-[#C4B5FD] font-bold'
-                  : 'text-white/75 hover:text-white'
-              }`}
-            >
-              <span>{t.draws}</span>
-              <span className="w-1.5 h-1.5 bg-[#7856FF] rounded-full animate-pulse" />
-            </button>
+                <button
+                  onClick={() => setCurrentTab('draws')}
+                  className={`transition-all py-1 flex items-center space-x-1 ${
+                    currentTab === 'draws'
+                      ? 'border-b-2 border-[#7856FF] text-[#C4B5FD] font-bold'
+                      : 'text-white/75 hover:text-white'
+                  }`}
+                >
+                  <span>{t.draws}</span>
+                  <span className="w-1.5 h-1.5 bg-[#7856FF] rounded-full animate-pulse" />
+                </button>
 
-            <button
-              onClick={() => setCurrentTab('payouts')}
-              className={`transition-all py-1 ${
-                currentTab === 'payouts'
-                  ? 'border-b-2 border-[#7856FF] text-[#C4B5FD] font-bold'
-                  : 'text-white/75 hover:text-white'
-              }`}
-            >
-              {t.payouts}
-            </button>
+                <button
+                  onClick={() => setCurrentTab('payouts')}
+                  className={`transition-all py-1 ${
+                    currentTab === 'payouts'
+                      ? 'border-b-2 border-[#7856FF] text-[#C4B5FD] font-bold'
+                      : 'text-white/75 hover:text-white'
+                  }`}
+                >
+                  {t.payouts}
+                </button>
+              </>
+            )}
 
             {hasAdminAccess && (
               <button
@@ -237,17 +253,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <button
                       onClick={() => {
                         setShowUserMenu(false);
-                        setShowEditProfile(true);
-                      }}
-                      className="w-full flex items-center space-x-2 px-3 py-2 rounded-sm text-xs text-gray-700 hover:bg-gray-100 transition-colors uppercase tracking-wider font-semibold text-[11px]"
-                    >
-                      <UserIcon className="w-3.5 h-3.5 text-[#7856FF]" />
-                      <span>Edit Profile</span>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        setShowUserMenu(false);
                         onOpenLegal();
                       }}
                       className="w-full flex items-center space-x-2 px-3 py-2 rounded-sm text-xs text-gray-700 hover:bg-gray-100 transition-colors uppercase tracking-wider font-semibold text-[11px]"
@@ -285,55 +290,61 @@ export const Navbar: React.FC<NavbarProps> = ({
       {/* Mobile Collapsible Navigation Menu */}
       {mobileMenuOpen && (
         <div className="lg:hidden bg-[#22153D] border-t-2 border-[#7856FF] px-4 pt-3 pb-5 space-y-1.5 text-xs uppercase tracking-widest font-semibold">
-          <button
-            onClick={() => { setCurrentTab('dashboard'); setMobileMenuOpen(false); }}
-            className={`w-full flex items-center space-x-2 px-3 py-2.5 rounded-sm ${
-              currentTab === 'dashboard' ? 'bg-[#7856FF]/20 text-[#C4B5FD] border-l-4 border-[#7856FF]' : 'text-white/80 hover:bg-white/5'
-            }`}
-          >
-            <LayoutDashboard className="w-4 h-4" />
-            <span>{t.dashboard}</span>
-          </button>
+          {!isAdmin && (
+            <button
+              onClick={() => { setCurrentTab('dashboard'); setMobileMenuOpen(false); }}
+              className={`w-full flex items-center space-x-2 px-3 py-2.5 rounded-sm ${
+                currentTab === 'dashboard' ? 'bg-[#7856FF]/20 text-[#C4B5FD] border-l-4 border-[#7856FF]' : 'text-white/80 hover:bg-white/5'
+              }`}
+            >
+              <LayoutDashboard className="w-4 h-4" />
+              <span>{t.dashboard}</span>
+            </button>
+          )}
 
-          <button
-            onClick={() => { setCurrentTab('discover'); setMobileMenuOpen(false); }}
-            className={`w-full flex items-center space-x-2 px-3 py-2.5 rounded-sm ${
-              currentTab === 'discover' ? 'bg-[#7856FF]/20 text-[#C4B5FD] border-l-4 border-[#7856FF]' : 'text-white/80 hover:bg-white/5'
-            }`}
-          >
-            <Compass className="w-4 h-4" />
-            <span>{t.discover}</span>
-          </button>
+          {!isAdmin && (
+            <>
+              <button
+                onClick={() => { setCurrentTab('discover'); setMobileMenuOpen(false); }}
+                className={`w-full flex items-center space-x-2 px-3 py-2.5 rounded-sm ${
+                  currentTab === 'discover' ? 'bg-[#7856FF]/20 text-[#C4B5FD] border-l-4 border-[#7856FF]' : 'text-white/80 hover:bg-white/5'
+                }`}
+              >
+                <Compass className="w-4 h-4" />
+                <span>{t.discover}</span>
+              </button>
 
-          <button
-            onClick={() => { setCurrentTab('contributions'); setMobileMenuOpen(false); }}
-            className={`w-full flex items-center space-x-2 px-3 py-2.5 rounded-sm ${
-              currentTab === 'contributions' ? 'bg-[#7856FF]/20 text-[#C4B5FD] border-l-4 border-[#7856FF]' : 'text-white/80 hover:bg-white/5'
-            }`}
-          >
-            <Receipt className="w-4 h-4" />
-            <span>{t.contributions}</span>
-          </button>
+              <button
+                onClick={() => { setCurrentTab('contributions'); setMobileMenuOpen(false); }}
+                className={`w-full flex items-center space-x-2 px-3 py-2.5 rounded-sm ${
+                  currentTab === 'contributions' ? 'bg-[#7856FF]/20 text-[#C4B5FD] border-l-4 border-[#7856FF]' : 'text-white/80 hover:bg-white/5'
+                }`}
+              >
+                <Receipt className="w-4 h-4" />
+                <span>{t.contributions}</span>
+              </button>
 
-          <button
-            onClick={() => { setCurrentTab('draws'); setMobileMenuOpen(false); }}
-            className={`w-full flex items-center space-x-2 px-3 py-2.5 rounded-sm ${
-              currentTab === 'draws' ? 'bg-[#7856FF]/20 text-[#C4B5FD] border-l-4 border-[#7856FF]' : 'text-white/80 hover:bg-white/5'
-            }`}
-          >
-            <Sparkles className="w-4 h-4 text-[#C4B5FD]" />
-            <span>{t.draws}</span>
-          </button>
+              <button
+                onClick={() => { setCurrentTab('draws'); setMobileMenuOpen(false); }}
+                className={`w-full flex items-center space-x-2 px-3 py-2.5 rounded-sm ${
+                  currentTab === 'draws' ? 'bg-[#7856FF]/20 text-[#C4B5FD] border-l-4 border-[#7856FF]' : 'text-white/80 hover:bg-white/5'
+                }`}
+              >
+                <Sparkles className="w-4 h-4 text-[#C4B5FD]" />
+                <span>{t.draws}</span>
+              </button>
 
-          <button
-            onClick={() => { setCurrentTab('payouts'); setMobileMenuOpen(false); }}
-            className={`w-full flex items-center space-x-2 px-3 py-2.5 rounded-sm ${
-              currentTab === 'payouts' ? 'bg-[#7856FF]/20 text-[#C4B5FD] border-l-4 border-[#7856FF]' : 'text-white/80 hover:bg-white/5'
-            }`}
-          >
-            <Banknote className="w-4 h-4" />
-            <span>{t.payouts}</span>
-          </button>
+              <button
+                onClick={() => { setCurrentTab('payouts'); setMobileMenuOpen(false); }}
+                className={`w-full flex items-center space-x-2 px-3 py-2.5 rounded-sm ${
+                  currentTab === 'payouts' ? 'bg-[#7856FF]/20 text-[#C4B5FD] border-l-4 border-[#7856FF]' : 'text-white/80 hover:bg-white/5'
+                }`}
+              >
+                <Banknote className="w-4 h-4" />
+                <span>{t.payouts}</span>
+              </button>
+            </>
+          )}
 
           {hasAdminAccess && (
             <button
@@ -356,8 +367,6 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
         </div>
       )}
-
-      {showEditProfile && <EditProfileModal onClose={() => setShowEditProfile(false)} />}
     </header>
   );
 };

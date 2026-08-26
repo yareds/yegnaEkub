@@ -282,7 +282,16 @@ export const addEkubMember = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError('invalid-argument', 'ekubId and userId are required.');
   }
 
-  const { isSuper } = await checkIsEkubAdminOrSuperAdmin(context.auth.uid, ekubId, context.auth);
+  // Adding a member is exclusively the assigned Ekub Admin's job for their
+  // own circle -- the Super Admin's role is create/assign/invite plus
+  // read-only oversight, not day-to-day member management.
+  const { isSuper, isEkubAdm } = await checkIsEkubAdminOrSuperAdmin(context.auth.uid, ekubId, context.auth);
+  if (!isEkubAdm) {
+    throw new functions.https.HttpsError(
+      'permission-denied',
+      'Only the assigned Ekub Admin can add members to this circle -- the Super Admin does not manage individual circles.'
+    );
+  }
 
   const ekubRef = db.collection('ekubs').doc(ekubId);
   const memberRef = ekubRef.collection('members').doc(userId);
@@ -340,7 +349,14 @@ export const verifyContribution = functions.https.onCall(async (data, context) =
     throw new functions.https.HttpsError('invalid-argument', 'ekubId and contributionId are required.');
   }
 
-  const { isSuper } = await checkIsEkubAdminOrSuperAdmin(context.auth.uid, ekubId, context.auth);
+  // Verifying a contribution is exclusively the assigned Ekub Admin's job.
+  const { isSuper, isEkubAdm } = await checkIsEkubAdminOrSuperAdmin(context.auth.uid, ekubId, context.auth);
+  if (!isEkubAdm) {
+    throw new functions.https.HttpsError(
+      'permission-denied',
+      'Only the assigned Ekub Admin can verify contributions for this circle -- the Super Admin does not manage individual circles.'
+    );
+  }
 
   const contribRef = db.collection('ekubs').doc(ekubId).collection('contributions').doc(contributionId);
   const contribDoc = await contribRef.get();
@@ -394,7 +410,14 @@ export const rejectContribution = functions.https.onCall(async (data, context) =
     throw new functions.https.HttpsError('invalid-argument', 'ekubId, contributionId, and reason are required.');
   }
 
-  const { isSuper } = await checkIsEkubAdminOrSuperAdmin(context.auth.uid, ekubId, context.auth);
+  // Rejecting a contribution is exclusively the assigned Ekub Admin's job.
+  const { isSuper, isEkubAdm } = await checkIsEkubAdminOrSuperAdmin(context.auth.uid, ekubId, context.auth);
+  if (!isEkubAdm) {
+    throw new functions.https.HttpsError(
+      'permission-denied',
+      'Only the assigned Ekub Admin can reject contributions for this circle -- the Super Admin does not manage individual circles.'
+    );
+  }
 
   const contribRef = db.collection('ekubs').doc(ekubId).collection('contributions').doc(contributionId);
   const contribDoc = await contribRef.get();
@@ -640,7 +663,14 @@ export const approvePayout = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError('invalid-argument', 'ekubId and payoutId are required.');
   }
 
-  const { isSuper } = await checkIsEkubAdminOrSuperAdmin(context.auth.uid, ekubId, context.auth);
+  // Approving a payout is exclusively the assigned Ekub Admin's job.
+  const { isSuper, isEkubAdm } = await checkIsEkubAdminOrSuperAdmin(context.auth.uid, ekubId, context.auth);
+  if (!isEkubAdm) {
+    throw new functions.https.HttpsError(
+      'permission-denied',
+      'Only the assigned Ekub Admin can approve payouts for this circle -- the Super Admin does not manage individual circles.'
+    );
+  }
 
   const payoutRef = db.collection('ekubs').doc(ekubId).collection('payouts').doc(payoutId);
 
@@ -693,7 +723,14 @@ export const disbursePayout = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError('invalid-argument', 'ekubId, payoutId, and paymentReference are required.');
   }
 
-  const { isSuper } = await checkIsEkubAdminOrSuperAdmin(context.auth.uid, ekubId, context.auth);
+  // Disbursing a payout is exclusively the assigned Ekub Admin's job.
+  const { isSuper, isEkubAdm } = await checkIsEkubAdminOrSuperAdmin(context.auth.uid, ekubId, context.auth);
+  if (!isEkubAdm) {
+    throw new functions.https.HttpsError(
+      'permission-denied',
+      'Only the assigned Ekub Admin can disburse payouts for this circle -- the Super Admin does not manage individual circles.'
+    );
+  }
 
   const payoutRef = db.collection('ekubs').doc(ekubId).collection('payouts').doc(payoutId);
 
@@ -756,7 +793,15 @@ export const approveMembershipRequest = functions.https.onCall(async (data, cont
     throw new functions.https.HttpsError('invalid-argument', 'ekubId and userId are required.');
   }
 
-  const { isSuper } = await checkIsEkubAdminOrSuperAdmin(context.auth.uid, ekubId, context.auth);
+  // Approving a membership request is exclusively the assigned Ekub
+  // Admin's job for their own circle.
+  const { isSuper, isEkubAdm } = await checkIsEkubAdminOrSuperAdmin(context.auth.uid, ekubId, context.auth);
+  if (!isEkubAdm) {
+    throw new functions.https.HttpsError(
+      'permission-denied',
+      'Only the assigned Ekub Admin can approve membership requests for this circle -- the Super Admin does not manage individual circles.'
+    );
+  }
 
   const ekubRef = db.collection('ekubs').doc(ekubId);
   const memberRef = ekubRef.collection('members').doc(userId);
@@ -811,7 +856,15 @@ export const removeEkubMember = functions.https.onCall(async (data, context) => 
     throw new functions.https.HttpsError('invalid-argument', 'ekubId and userId are required.');
   }
 
-  const { isSuper } = await checkIsEkubAdminOrSuperAdmin(context.auth.uid, ekubId, context.auth);
+  // Removing a member (or rejecting a pending request) is exclusively the
+  // assigned Ekub Admin's job for their own circle.
+  const { isSuper, isEkubAdm } = await checkIsEkubAdminOrSuperAdmin(context.auth.uid, ekubId, context.auth);
+  if (!isEkubAdm) {
+    throw new functions.https.HttpsError(
+      'permission-denied',
+      'Only the assigned Ekub Admin can remove members from this circle -- the Super Admin does not manage individual circles.'
+    );
+  }
 
   const ekubRef = db.collection('ekubs').doc(ekubId);
   const memberRef = ekubRef.collection('members').doc(userId);
@@ -861,8 +914,8 @@ export const removeEkubMember = functions.https.onCall(async (data, context) => 
 // users/{userId} create rule in firestore.rules). This is now the ONLY way
 // a new 'member' account gets created: it pre-creates the Firebase Auth
 // user (via the Admin SDK, which bypasses client-side rules) AND their
-// Firestore profile in one step, then returns a password-reset link or invite link
-// the inviting admin can share with the person directly (WhatsApp, SMS, email,
+// Firestore profile in one step, then returns a password-reset link the
+// inviting admin can share with the person directly (WhatsApp, SMS, email,
 // etc.) -- there is no automatic email-sending configured here.
 // ============================================================================
 export const inviteMember = functions.https.onCall(async (data, context) => {
@@ -874,9 +927,6 @@ export const inviteMember = functions.https.onCall(async (data, context) => {
   if (!email || !fullName) {
     throw new functions.https.HttpsError('invalid-argument', 'email and fullName are required.');
   }
-
-  const trimmedEmail = String(email).trim().toLowerCase();
-  const trimmedName = String(fullName).trim();
 
   const isSuper = await checkIsSuperAdmin(context.auth.uid, context.auth);
   let isAnyEkubAdmin = false;
@@ -891,54 +941,35 @@ export const inviteMember = functions.https.onCall(async (data, context) => {
     );
   }
 
-  let userRecord: admin.auth.UserRecord | null = null;
+  let userRecord: admin.auth.UserRecord;
   try {
-    userRecord = await admin.auth().getUserByEmail(trimmedEmail);
-  } catch (err: any) {
-    if (err?.code === 'auth/user-not-found') {
-      try {
-        userRecord = await admin.auth().createUser({
-          email: trimmedEmail,
-          displayName: trimmedName,
-          emailVerified: false,
-        });
-      } catch (createErr: any) {
-        console.error('Failed to create auth user:', createErr);
-        if (createErr?.code === 'auth/email-already-exists') {
-          userRecord = await admin.auth().getUserByEmail(trimmedEmail);
-        } else {
-          throw new functions.https.HttpsError(
-            'invalid-argument',
-            createErr?.message || 'Failed to create user account with the provided email.'
-          );
-        }
-      }
-    } else {
-      console.error('Error looking up user by email:', err);
-      throw new functions.https.HttpsError(
-        'internal',
-        err?.message || 'Failed to look up user account.'
-      );
+    userRecord = await admin.auth().getUserByEmail(email);
+    const existingProfile = await db.collection('users').doc(userRecord.uid).get();
+    if (existingProfile.exists) {
+      throw new functions.https.HttpsError('already-exists', 'A YegnaEkub account for this email already exists.');
     }
-  }
-
-  if (!userRecord) {
-    throw new functions.https.HttpsError('internal', 'Unable to retrieve or create user record.');
-  }
-
-  const existingProfile = await db.collection('users').doc(userRecord.uid).get();
-  if (existingProfile.exists) {
-    throw new functions.https.HttpsError(
-      'already-exists',
-      `A YegnaEkub account for ${trimmedEmail} already exists.`
-    );
+    // Auth account exists but has no Firestore profile yet (e.g. a prior
+    // partial invite) -- fall through and create the profile below.
+  } catch (err: any) {
+    if (err instanceof functions.https.HttpsError) {
+      throw err;
+    }
+    if (err.code === 'auth/user-not-found') {
+      userRecord = await admin.auth().createUser({
+        email,
+        displayName: fullName,
+        emailVerified: false,
+      });
+    } else {
+      throw new functions.https.HttpsError('internal', 'Failed to look up or create the user account.');
+    }
   }
 
   const newProfile = {
     uid: userRecord.uid,
-    fullName: trimmedName,
-    email: trimmedEmail,
-    phoneNumber: phoneNumber ? String(phoneNumber).trim() : '',
+    fullName,
+    email,
+    phoneNumber: phoneNumber || '',
     photoURL: '',
     role: 'member',
     preferredLanguage: 'en',
@@ -948,13 +979,13 @@ export const inviteMember = functions.https.onCall(async (data, context) => {
   };
   await db.collection('users').doc(userRecord.uid).set(newProfile);
 
-  let resetLink = '';
-  try {
-    resetLink = await admin.auth().generatePasswordResetLink(trimmedEmail);
-  } catch (linkErr: any) {
-    console.warn('generatePasswordResetLink failed (email auth may be unconfigured in Firebase):', linkErr);
-    resetLink = `https://ais-dev-6qhunzlrcfdt7gvr3jhclb-118942989362.us-east1.run.app/?invited=${encodeURIComponent(trimmedEmail)}`;
-  }
+  // A continue URL so the person lands back in the actual app after setting
+  // their password, instead of a bare Firebase confirmation page with no
+  // way back in.
+  const resetLink = await admin.auth().generatePasswordResetLink(email, {
+    url: 'https://yegna-ekub.web.app/',
+    handleCodeInApp: false,
+  });
 
   await writeAuditLog({
     actorId: context.auth.uid,
@@ -963,8 +994,8 @@ export const inviteMember = functions.https.onCall(async (data, context) => {
     action: 'MEMBER_INVITED',
     entityType: 'admin',
     entityId: userRecord.uid,
-    reason: `Invited ${trimmedEmail} to the platform`,
-    newState: { email: trimmedEmail, fullName: trimmedName },
+    reason: `Invited ${email} to the platform`,
+    newState: { email, fullName },
   });
 
   return { success: true, uid: userRecord.uid, resetLink };
