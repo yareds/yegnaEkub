@@ -12,7 +12,7 @@ import {
   Plus, 
   UserCheck, 
   FileText, 
-  Search,
+  Search, 
   ExternalLink,
   ChevronRight,
   TrendingUp,
@@ -113,7 +113,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Ekub Admin check: Is the current user the designated admin of the selected Ekub?
   const isAssignedEkubAdmin = selectedEkub?.adminId === userProfile?.uid;
-  const canManageCurrentEkub = isSuperAdmin || isAssignedEkubAdmin;
+  // Approving membership requests and removing members are Ekub-Admin-only
+  // operations on the backend now (the Super Admin's role is create/assign/
+  // invite plus read-only oversight, not day-to-day circle management) --
+  // this must match that restriction, not grant Super Admin a UI path to an
+  // action the Cloud Function will reject.
+  const canManageCurrentEkub = isAssignedEkubAdmin;
 
   // Load members whenever selected Ekub changes
   React.useEffect(() => {
@@ -537,26 +542,37 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </div>
                   )}
 
-                  {/* Action Buttons */}
-                  <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
-                    <button
-                      onClick={() => handleVerifyContribution(c)}
-                      disabled={processingId === c.id}
-                      className="flex-1 py-2.5 bg-green-600 hover:bg-green-700 text-white font-bold text-xs uppercase tracking-wider shadow-sm transition-colors flex items-center justify-center space-x-1.5 rounded-lg disabled:opacity-50"
-                    >
-                      <CheckCircle2 className="w-4 h-4" />
-                      <span>{processingId === c.id ? 'Verifying...' : 'Approve & Confirm'}</span>
-                    </button>
+                  {/* Action Buttons -- verifying a contribution is
+                      exclusively that Ekub's assigned Admin's job now, not
+                      the Super Admin's. Checking per-item (not just the
+                      globally-selected Ekub filter) since "All Circles" can
+                      show contributions from several Ekubs at once. */}
+                  {c.ekubId && ekubs.find(e => e.id === c.ekubId)?.adminId === userProfile?.uid ? (
+                    <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
+                      <button
+                        onClick={() => handleVerifyContribution(c)}
+                        disabled={processingId === c.id}
+                        className="flex-1 py-2.5 bg-green-600 hover:bg-green-700 text-white font-bold text-xs uppercase tracking-wider shadow-sm transition-colors flex items-center justify-center space-x-1.5 rounded-lg disabled:opacity-50"
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>{processingId === c.id ? 'Verifying...' : 'Approve & Confirm'}</span>
+                      </button>
 
-                    <button
-                      onClick={() => handleRejectContribution(c)}
-                      disabled={processingId === c.id}
-                      className="px-4 py-2.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-bold text-xs uppercase tracking-wider transition-colors flex items-center justify-center space-x-1.5 rounded-lg disabled:opacity-50"
-                    >
-                      <XCircle className="w-4 h-4" />
-                      <span>Reject</span>
-                    </button>
-                  </div>
+                      <button
+                        onClick={() => handleRejectContribution(c)}
+                        disabled={processingId === c.id}
+                        className="px-4 py-2.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-bold text-xs uppercase tracking-wider transition-colors flex items-center justify-center space-x-1.5 rounded-lg disabled:opacity-50"
+                      >
+                        <XCircle className="w-4 h-4" />
+                        <span>Reject</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="pt-2 border-t border-gray-100 flex items-center space-x-1.5 text-[11px] text-gray-500">
+                      <ShieldCheck className="w-3.5 h-3.5 text-gray-400" />
+                      <span>View only -- only this circle's assigned Ekub Admin can verify or reject.</span>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -611,28 +627,37 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </div>
                   )}
 
-                  {/* Multi-step Approval Actions */}
-                  <div className="pt-2 border-t border-gray-100 flex gap-2">
-                    {p.status === 'under_review' || p.status === 'documents_required' || p.status === 'pending' ? (
-                      <button
-                        onClick={() => handleApprovePayout(p)}
-                        disabled={processingId === p.id}
-                        className="flex-1 py-2.5 bg-[#7856FF] hover:bg-[#6340FF] text-white font-bold text-xs uppercase tracking-wider shadow-sm transition-colors rounded-lg disabled:opacity-50"
-                      >
-                        {processingId === p.id ? 'Approving...' : 'Approve Bank Details'}
-                      </button>
-                    ) : p.status === 'approved' ? (
-                      <button
-                        onClick={() => setDisburseTarget(p)}
-                        className="flex-1 py-2.5 bg-green-600 hover:bg-green-700 text-white font-bold text-xs uppercase tracking-wider shadow-sm transition-colors rounded-lg flex items-center justify-center space-x-1.5"
-                      >
-                        <Banknote className="w-4 h-4" />
-                        <span>Record Bank Transfer (Disburse)</span>
-                      </button>
-                    ) : (
-                      <span className="text-xs text-gray-500 font-medium">Payout Processed</span>
-                    )}
-                  </div>
+                  {/* Multi-step Approval Actions -- approving/disbursing a
+                      payout is exclusively that Ekub's assigned Admin's job
+                      now, not the Super Admin's. */}
+                  {p.ekubId && ekubs.find(e => e.id === p.ekubId)?.adminId === userProfile?.uid ? (
+                    <div className="pt-2 border-t border-gray-100 flex gap-2">
+                      {p.status === 'under_review' || p.status === 'documents_required' || p.status === 'pending' ? (
+                        <button
+                          onClick={() => handleApprovePayout(p)}
+                          disabled={processingId === p.id}
+                          className="flex-1 py-2.5 bg-[#7856FF] hover:bg-[#6340FF] text-white font-bold text-xs uppercase tracking-wider shadow-sm transition-colors rounded-lg disabled:opacity-50"
+                        >
+                          {processingId === p.id ? 'Approving...' : 'Approve Bank Details'}
+                        </button>
+                      ) : p.status === 'approved' ? (
+                        <button
+                          onClick={() => setDisburseTarget(p)}
+                          className="flex-1 py-2.5 bg-green-600 hover:bg-green-700 text-white font-bold text-xs uppercase tracking-wider shadow-sm transition-colors rounded-lg flex items-center justify-center space-x-1.5"
+                        >
+                          <Banknote className="w-4 h-4" />
+                          <span>Record Bank Transfer (Disburse)</span>
+                        </button>
+                      ) : (
+                        <span className="text-xs text-gray-500 font-medium">Payout Processed</span>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="pt-2 border-t border-gray-100 flex items-center space-x-1.5 text-[11px] text-gray-500">
+                      <ShieldCheck className="w-3.5 h-3.5 text-gray-400" />
+                      <span>View only -- only this circle's assigned Ekub Admin can process this payout.</span>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -967,7 +992,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   className="w-full py-2.5 bg-[#7856FF] hover:bg-[#6340FF] text-white font-bold text-xs uppercase tracking-wider shadow-sm transition-colors flex items-center justify-center space-x-1.5 rounded-lg"
                 >
                   <Sparkles className="w-4 h-4" />
-                  <span>Launch Live Draw</span>
+                  {/* The modal this opens already enforces who can actually
+                      start the draw (only that Ekub's assigned Admin) --
+                      this label just avoids implying the Super Admin can
+                      launch it themselves. */}
+                  <span>{e.adminId === userProfile?.uid ? 'Launch Live Draw' : 'View Live Draw'}</span>
                 </button>
               </div>
             ))}
