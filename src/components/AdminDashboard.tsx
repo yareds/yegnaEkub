@@ -12,7 +12,7 @@ import {
   Plus, 
   UserCheck, 
   FileText, 
-  Search, 
+  Search,
   ExternalLink,
   ChevronRight,
   TrendingUp,
@@ -33,7 +33,8 @@ import {
   Draw, 
   Payout, 
   SupportTicket, 
-  AuditLog 
+  AuditLog,
+  UserProfile
 } from '../types';
 import { 
   verifyPayment, 
@@ -45,7 +46,8 @@ import {
   approveMembershipRequest,
   removeEkubMember,
   inviteMember,
-  getAuditLogs
+  getAuditLogs,
+  getAllUsers
 } from '../firebase/ekubService';
 import { ETHIOPIAN_BANK_ACCOUNTS } from '../data/demoData';
 
@@ -95,6 +97,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [reassignAdminUid, setReassignAdminUid] = useState('');
   const [reassignAdminName, setReassignAdminName] = useState('');
   const [reassignSubmitting, setReassignSubmitting] = useState(false);
+  const [platformUsers, setPlatformUsers] = useState<UserProfile[]>([]);
+  const [loadingPlatformUsers, setLoadingPlatformUsers] = useState(false);
+  const [manualUidEntry, setManualUidEntry] = useState(false);
 
   // Action status / processing
   const [processingId, setProcessingId] = useState<string | null>(null);
@@ -130,6 +135,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         .finally(() => setLoadingMembers(false));
     }
   }, [selectedEkubId]);
+
+  // Load the platform user list when the Reassign tab opens, so the Super
+  // Admin can pick a real person instead of pasting a raw Firebase UID.
+  React.useEffect(() => {
+    if (activeTab === 'reassign' && platformUsers.length === 0 && !loadingPlatformUsers) {
+      setLoadingPlatformUsers(true);
+      getAllUsers()
+        .then((users) => setPlatformUsers(users))
+        .finally(() => setLoadingPlatformUsers(false));
+    }
+  }, [activeTab]);
 
   // Load audit logs when switching to audit tab
   React.useEffect(() => {
@@ -320,12 +336,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <span>{isSuperAdmin ? 'SUPER ADMIN WORKSPACE' : 'EKUB ADMIN WORKSPACE'}</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
-              {language === 'am' ? 'የአስተዳዳሪ ማዕከል' : 'Operations & Governance Center'}
+              {isSuperAdmin
+                ? (language === 'am' ? 'የመድረክ አስተዳደር ማዕከል' : 'Platform Governance Center')
+                : (language === 'am' ? 'የክበብ አስተዳደር ማዕከል' : 'Circle Operations Center')}
             </h1>
             <p className="text-xs text-white/70 mt-1 max-w-xl">
-              {language === 'am'
-                ? 'የባንክ ደረሰኞችን ያረጋግጡ፣ አባላትን ያቀናብሩ እና የዕቁብ ድረሻ ክፍያዎችን ያጽድቁ።'
-                : 'Audit Ethiopian bank receipts, approve verified draw winners, and administer member rosters.'}
+              {isSuperAdmin
+                ? (language === 'am'
+                    ? 'ዕቁቦችን ይፍጠሩ፣ የክበብ አስተዳዳሪዎችን ይመድቡ ወይም ይቀይሩ፣ ሰዎችን ይጋብዙ፣ እና በመላው መድረክ ላይ ያለውን እንቅስቃሴ ይከታተሉ።'
+                    : 'Create Ekubs, assign or reassign Circle Admins, invite people to the platform, and monitor activity platform-wide. Day-to-day circle operations -- verifying receipts, approving payouts, running draws -- belong to each circle\u2019s assigned Admin.')
+                : (language === 'am'
+                    ? 'የባንክ ደረሰኞችን ያረጋግጡ፣ አባላትን ያቀናብሩ እና የዕቁብ ድረሻ ክፍያዎችን ያጽድቁ።'
+                    : 'Audit bank receipts, approve verified draw winners, and administer your circle\u2019s member roster.')}
             </p>
           </div>
 
@@ -821,17 +843,55 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
-                New Admin User UID *
-              </label>
-              <input
-                type="text"
-                required
-                value={reassignAdminUid}
-                onChange={(e) => setReassignAdminUid(e.target.value)}
-                placeholder="e.g. Firebase Auth UID of the new Ekub Admin"
-                className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-300 rounded-lg text-xs font-mono focus:outline-none focus:border-[#7856FF]"
-              />
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-bold uppercase tracking-wider text-gray-700">
+                  New Admin *
+                </label>
+                <button
+                  type="button"
+                  onClick={() => { setManualUidEntry(!manualUidEntry); setReassignAdminUid(''); setReassignAdminName(''); }}
+                  className="text-[10px] font-bold uppercase tracking-wider text-[#7856FF] hover:underline"
+                >
+                  {manualUidEntry ? 'Pick from list instead' : 'Enter UID manually instead'}
+                </button>
+              </div>
+
+              {manualUidEntry ? (
+                <input
+                  type="text"
+                  required
+                  value={reassignAdminUid}
+                  onChange={(e) => setReassignAdminUid(e.target.value)}
+                  placeholder="e.g. Firebase Auth UID of the new Ekub Admin"
+                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-300 rounded-lg text-xs font-mono focus:outline-none focus:border-[#7856FF]"
+                />
+              ) : (
+                <select
+                  required
+                  value={reassignAdminUid}
+                  onChange={(e) => {
+                    const uid = e.target.value;
+                    setReassignAdminUid(uid);
+                    const picked = platformUsers.find(u => u.uid === uid);
+                    setReassignAdminName(picked?.fullName || '');
+                  }}
+                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-300 rounded-lg text-xs font-bold text-gray-800 focus:outline-none focus:border-[#7856FF]"
+                >
+                  <option value="">
+                    {loadingPlatformUsers ? 'Loading people...' : platformUsers.length === 0 ? 'No invited people yet -- invite someone first' : '-- Select a person --'}
+                  </option>
+                  {platformUsers.map(u => (
+                    <option key={u.uid} value={u.uid}>
+                      {u.fullName} ({u.email})
+                    </option>
+                  ))}
+                </select>
+              )}
+              <p className="text-[10px] text-gray-500 mt-1">
+                {manualUidEntry
+                  ? 'Paste the UID shown after inviting someone (Invite Member tab).'
+                  : 'Only people who\u2019ve been invited to the platform appear here. Not seeing them? Invite them first.'}
+              </p>
             </div>
 
             <div>
@@ -844,6 +904,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 onChange={(e) => setReassignAdminName(e.target.value)}
                 placeholder="e.g. Abebe Bikila"
                 className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-300 rounded-lg text-xs focus:outline-none focus:border-[#7856FF]"
+                readOnly={!manualUidEntry && !!reassignAdminUid}
               />
             </div>
 

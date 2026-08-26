@@ -22,7 +22,8 @@ import {
   AppNotification, 
   AuditLog, 
   SupportTicket,
-  PreferredPaymentMethod
+  PreferredPaymentMethod,
+  UserProfile
 } from '../types';
 import { 
   DEMO_EKUBS, 
@@ -204,6 +205,24 @@ export const removeEkubMember = async (ekubId: string, userId: string): Promise<
 // been removed -- this is now the only way a 'member' account gets
 // created. Returns a password-reset link the inviting admin can share
 // directly (no automatic email is sent).
+// Lists platform users a Super Admin can assign as an Ekub's Admin --
+// members only (never another super_admin), so the Reassign/Create-Ekub
+// forms can offer a real "pick a person" dropdown instead of requiring a
+// raw Firebase UID to be copy-pasted in. Relies on the existing `users`
+// collection read rule (any authenticated user can read the collection),
+// same as every other client-side Firestore read in this file.
+export const getAllUsers = async (): Promise<UserProfile[]> => {
+  try {
+    const snap = await getDocs(collection(db, 'users'));
+    return snap.docs
+      .map(d => d.data() as UserProfile)
+      .filter(u => u.role !== 'super_admin' && (u.role as string) !== 'admin');
+  } catch (err) {
+    console.error('getAllUsers failed:', err);
+    return [];
+  }
+};
+
 export const inviteMember = async (email: string, fullName: string, phoneNumber?: string): Promise<{ uid: string; resetLink: string }> => {
   try {
     const res = await inviteMemberCallable({ email, fullName, phoneNumber });

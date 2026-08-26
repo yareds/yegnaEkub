@@ -83,25 +83,20 @@ export const createEkub = functions.https.onCall(async (data, context) => {
   const ekubId = data.id || `ekub-${Date.now()}-${Math.random().toString(36).substring(7)}`;
 
   // The Super Admin is never a member of any Ekub -- they manage the
-  // platform, not individual circles. adminId must be explicitly supplied
-  // (the UID of an existing, already-invited user) and must NOT be the
-  // Super Admin's own uid. Defaulting to the caller here was the exact bug
+  // platform, not individual circles. An Ekub may be created unassigned
+  // (adminId omitted/empty) and have its Admin assigned afterward via
+  // assignEkubAdmin -- but if an adminId IS supplied here, it must not be
+  // the Super Admin's own uid. Defaulting to the caller was the exact bug
   // that made every Super-Admin-created Ekub silently add them as its
   // first member.
-  if (!data.adminId) {
+  const adminUid: string = data.adminId ? String(data.adminId) : '';
+  if (adminUid && adminUid === context.auth.uid) {
     throw new functions.https.HttpsError(
       'invalid-argument',
-      'adminId is required -- specify the UID of the existing user to assign as this Ekub\u2019s Admin.'
+      'The Super Admin cannot be assigned as an Ekub\u2019s Admin -- the Super Admin is never a member of any circle. Assign a different, already-invited user, or leave it unassigned and assign one later.'
     );
   }
-  if (data.adminId === context.auth.uid) {
-    throw new functions.https.HttpsError(
-      'invalid-argument',
-      'The Super Admin cannot be assigned as an Ekub\u2019s Admin -- the Super Admin is never a member of any circle. Assign a different, already-invited user.'
-    );
-  }
-  const adminUid = data.adminId;
-  const adminName = data.adminName || 'Assigned Admin';
+  const adminName = adminUid ? (data.adminName || 'Assigned Admin') : 'Unassigned';
 
   const newEkub = {
     id: ekubId,
@@ -112,7 +107,7 @@ export const createEkub = functions.https.onCall(async (data, context) => {
     contributionAmount: Number(data.contributionAmount) || 1000,
     memberLimit: Number(data.memberLimit) || 10,
     payoutAmount: Number(data.payoutAmount) || (Number(data.contributionAmount) * Number(data.memberLimit)),
-    currentMemberCount: 1,
+    currentMemberCount: adminUid ? 1 : 0,
     currentCycle: 1,
     totalCycles: Number(data.memberLimit) || 10,
     startDate: data.startDate || new Date().toISOString().split('T')[0],
@@ -135,7 +130,7 @@ export const createEkub = functions.https.onCall(async (data, context) => {
     createdAt: new Date().toISOString(),
   };
 
-  const initialAdminMember = {
+  const initialAdminMember = adminUid ? {
     userId: adminUid,
     displayName: adminName,
     role: 'admin',
@@ -144,14 +139,16 @@ export const createEkub = functions.https.onCall(async (data, context) => {
     contributionStatus: 'pending',
     hasReceivedPayout: false,
     eligibleForDraw: true,
-  };
+  } : null;
 
   // Execute creation in an atomic transaction
   await db.runTransaction(async (transaction) => {
     const ekubRef = db.collection('ekubs').doc(ekubId);
-    const memberRef = ekubRef.collection('members').doc(adminUid);
     transaction.set(ekubRef, newEkub);
-    transaction.set(memberRef, initialAdminMember);
+    if (initialAdminMember) {
+      const memberRef = ekubRef.collection('members').doc(adminUid);
+      transaction.set(memberRef, initialAdminMember);
+    }
   });
 
   await writeAuditLog({
@@ -162,7 +159,9 @@ export const createEkub = functions.https.onCall(async (data, context) => {
     entityType: 'ekub',
     entityId: ekubId,
     ekubId,
-    reason: `Super Admin created Ekub circle "${newEkub.name}" with initial Admin "${adminName}"`,
+    reason: adminUid
+      ? `Super Admin created Ekub circle "${newEkub.name}" with initial Admin "${adminName}"`
+      : `Super Admin created Ekub circle "${newEkub.name}" (unassigned -- no Admin yet)`,
     newState: { adminId: adminUid, name: newEkub.name, contributionAmount: newEkub.contributionAmount },
   });
 
