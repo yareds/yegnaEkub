@@ -31,7 +31,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
   const { isAdmin } = useAuth();
   const { t, language } = useTranslation();
 
-  const [frequencyFilter, setFrequencyFilter] = useState<'all' | 'weekly' | 'biweekly' | 'monthly'>('all');
+  const [frequencyFilter, setFrequencyFilter] = useState<'all' | 'daily' | 'weekly' | 'biweekly' | 'monthly'>('all');
   const [searchTerm, setSearchTerm] = useState('');
 
   const filtered = (ekubs || []).filter((e) => {
@@ -92,7 +92,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
       {/* Filter and Search Bar */}
       <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
         <div className="flex space-x-1.5 overflow-x-auto w-full sm:w-auto">
-          {(['all', 'weekly', 'biweekly', 'monthly'] as const).map((freq) => (
+          {(['all', 'daily', 'weekly', 'biweekly', 'monthly'] as const).map((freq) => (
             <button
               key={freq}
               onClick={() => setFrequencyFilter(freq)}

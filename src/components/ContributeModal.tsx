@@ -11,11 +11,13 @@ import {
   Coins,
   FileCheck
 } from 'lucide-react';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useAuth } from '../firebase/AuthContext';
 import { useTranslation } from '../locales/TranslationContext';
 import { Ekub, PreferredPaymentMethod } from '../types';
 import { ETHIOPIAN_BANK_ACCOUNTS } from '../data/demoData';
 import { submitContribution } from '../firebase/ekubService';
+import { storage } from '../firebase/config';
 
 interface ContributeModalProps {
   ekub: Ekub;
@@ -36,6 +38,8 @@ export const ContributeModal: React.FC<ContributeModalProps> = ({
   const [txRef, setTxRef] = useState('');
   const [receiptUrl, setReceiptUrl] = useState('');
   const [receiptFileName, setReceiptFileName] = useState('');
+  const [uploadingReceipt, setUploadingReceipt] = useState(false);
+  const [uploadError, setUploadError] = useState('');
   const [copiedAcc, setCopiedAcc] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submittedSuccess, setSubmittedSuccess] = useState(false);
@@ -61,12 +65,42 @@ export const ContributeModal: React.FC<ContributeModalProps> = ({
     setTimeout(() => setCopiedAcc(false), 2000);
   };
 
-  const handleSimulateReceipt = () => {
-    // Convenient instant sample receipt for frictionless testing
-    setReceiptUrl('https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?w=600&auto=format&fit=crop&q=60');
-    setReceiptFileName(`Receipt_${selectedMethod.toUpperCase()}_${Date.now()}.png`);
-    if (!txRef) {
-      setTxRef(`${selectedMethod.toUpperCase().substring(0, 3)}-${Math.floor(10000000 + Math.random() * 90000000)}`);
+  const handleReceiptFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadError('');
+
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'application/pdf'];
+    if (!allowedTypes.includes(file.type)) {
+      setUploadError(language === 'am' ? 'እባክዎ ምስል ወይም PDF ፋይል ይምረጡ።' : 'Please choose an image or PDF file.');
+      e.target.value = '';
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadError(language === 'am' ? 'ፋይሉ ከ5 ሜባ በላይ መሆን የለበትም።' : 'File must be under 5MB.');
+      e.target.value = '';
+      return;
+    }
+    if (!userProfile?.uid) {
+      setUploadError('You must be signed in to upload a receipt.');
+      return;
+    }
+
+    setUploadingReceipt(true);
+    try {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const path = `receipts/${ekub.id}/${userProfile.uid}/${Date.now()}_${safeName}`;
+      const storageRef = ref(storage, path);
+      await uploadBytes(storageRef, file, { contentType: file.type });
+      const url = await getDownloadURL(storageRef);
+      setReceiptUrl(url);
+      setReceiptFileName(file.name);
+    } catch (err: any) {
+      console.error('Receipt upload failed:', err);
+      setUploadError(err?.message || 'Failed to upload receipt. Please try again.');
+    } finally {
+      setUploadingReceipt(false);
     }
   };
 
@@ -74,6 +108,10 @@ export const ContributeModal: React.FC<ContributeModalProps> = ({
     e.preventDefault();
     if (!txRef.trim()) {
       setErrorMessage('Please enter your bank or Telebirr transaction reference number.');
+      return;
+    }
+    if (!receiptUrl) {
+      setErrorMessage(language === 'am' ? 'እባክዎ የክፍያ ደረሰኝ ያያይዙ።' : 'Please upload your payment receipt.');
       return;
     }
 
@@ -91,7 +129,7 @@ export const ContributeModal: React.FC<ContributeModalProps> = ({
         cycleCount,
         amountPerCycle: ekub.contributionAmount,
         paymentMethod: selectedMethod,
-        receiptUrl: receiptUrl || 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?w=600&auto=format&fit=crop&q=60',
+        receiptUrl,
         transactionReference: txRef,
       });
 
@@ -261,14 +299,26 @@ export const ContributeModal: React.FC<ContributeModalProps> = ({
                 />
               </div>
 
-              {/* Receipt Upload & Instant Sample Generator */}
+              {/* Receipt Upload */}
               <div>
                 <label className="block text-[10px] font-bold text-gray-700 uppercase tracking-wider mb-1">
-                  {t.uploadReceipt}
+                  {t.uploadReceipt} <span className="text-red-500">*</span>
                 </label>
-                
+
+                {uploadError && (
+                  <div className="flex items-start space-x-1.5 bg-red-50 border border-red-200 text-red-700 text-[11px] rounded-lg px-2.5 py-2 mb-2">
+                    <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                    <span>{uploadError}</span>
+                  </div>
+                )}
+
                 <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center hover:border-gray-400 transition-colors bg-gray-50/50">
-                  {receiptFileName ? (
+                  {uploadingReceipt ? (
+                    <div className="flex items-center justify-center space-x-2 text-xs text-gray-600 py-2">
+                      <div className="w-4 h-4 border-2 border-[#7856FF] border-t-transparent rounded-full animate-spin" />
+                      <span>{language === 'am' ? 'በመስቀል ላይ...' : 'Uploading...'}</span>
+                    </div>
+                  ) : receiptFileName ? (
                     <div className="flex items-center justify-between bg-green-50 border border-green-200 p-2.5 rounded-lg text-green-800 text-xs">
                       <div className="flex items-center space-x-2 truncate">
                         <FileCheck className="w-4 h-4 text-green-600 shrink-0" />
@@ -286,13 +336,18 @@ export const ContributeModal: React.FC<ContributeModalProps> = ({
                     <div className="space-y-2">
                       <UploadCloud className="w-6 h-6 text-gray-400 mx-auto" />
                       <p className="text-xs text-gray-600 font-medium">{t.uploadHelp}</p>
-                      <button
-                        type="button"
-                        onClick={handleSimulateReceipt}
-                        className="text-xs font-bold text-[#7856FF] hover:underline"
-                      >
-                        Attach Sample Telebirr / CBE Mobile Receipt
-                      </button>
+                      <label className="inline-block text-xs font-bold text-[#7856FF] hover:underline cursor-pointer">
+                        {language === 'am' ? 'ፋይል ይምረጡ' : 'Choose a file'}
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/jpg,image/webp,application/pdf"
+                          onChange={handleReceiptFileChange}
+                          className="hidden"
+                        />
+                      </label>
+                      <p className="text-[10px] text-gray-400">
+                        {language === 'am' ? 'ምስል ወይም PDF፣ እስከ 5 ሜባ' : 'Image or PDF, up to 5MB'}
+                      </p>
                     </div>
                   )}
                 </div>
@@ -313,7 +368,7 @@ export const ContributeModal: React.FC<ContributeModalProps> = ({
 
               <button
                 type="submit"
-                disabled={submitting}
+                disabled={submitting || uploadingReceipt || !receiptUrl}
                 className="px-5 py-2.5 bg-[#7856FF] hover:bg-[#6340FF] text-white font-bold text-xs uppercase tracking-widest shadow-md active:scale-98 transition-all disabled:opacity-50 flex items-center justify-center space-x-2 rounded-xl"
               >
                 <Coins className="w-4 h-4 text-white" />
@@ -329,4 +384,3 @@ export const ContributeModal: React.FC<ContributeModalProps> = ({
     </div>
   );
 };
-

@@ -14,34 +14,11 @@ async function checkIsSuperAdmin(uid: string, authData?: any): Promise<boolean> 
   if (authData?.token?.yegnaEkub_super_admin === true) {
     return true;
   }
-  const email = (authData?.token?.email || '').toLowerCase().trim();
-  if (email === 'yared.abegaz@gmail.com') {
+  if (authData?.token?.email === 'yared.abegaz@gmail.com') {
     return true;
   }
-  try {
-    const adminDoc = await db.collection('admins').doc(uid).get();
-    if (adminDoc.exists) {
-      return true;
-    }
-  } catch (e) {
-    console.warn('Error reading admins collection:', e);
-  }
-
-  try {
-    const userDoc = await db.collection('users').doc(uid).get();
-    if (userDoc.exists) {
-      const uData = userDoc.data();
-      const userRole = uData?.role;
-      const userEmail = (uData?.email || '').toLowerCase().trim();
-      if (userRole === 'super_admin' || userRole === 'admin' || userEmail === 'yared.abegaz@gmail.com') {
-        return true;
-      }
-    }
-  } catch (e) {
-    console.warn('Error reading users collection:', e);
-  }
-
-  return false;
+  const adminDoc = await db.collection('admins').doc(uid).get();
+  return adminDoc.exists;
 }
 
 // --- Internal Helper: Check if caller is Ekub Admin or Super Admin ---
@@ -990,14 +967,30 @@ export const inviteMember = functions.https.onCall(async (data, context) => {
   }
 
   let userRecord: admin.auth.UserRecord;
+  let alreadyExisted = false;
   try {
     userRecord = await admin.auth().getUserByEmail(email);
     const existingProfile = await db.collection('users').doc(userRecord.uid).get();
     if (existingProfile.exists) {
-      throw new functions.https.HttpsError('already-exists', 'A YegnaEkub account for this email already exists.');
+      alreadyExisted = true;
+      // The profile already exists -- do NOT modify or overwrite any existing fields.
+    } else {
+      // Auth account exists but has no Firestore profile yet (e.g. a prior
+      // partial invite) -- create the profile below.
+      const newProfile = {
+        uid: userRecord.uid,
+        fullName,
+        email,
+        phoneNumber: phoneNumber || '',
+        photoURL: '',
+        role: 'member',
+        preferredLanguage: 'en',
+        preferredPaymentMethod: 'telebirr',
+        verificationStatus: 'verified',
+        createdAt: new Date().toISOString(),
+      };
+      await db.collection('users').doc(userRecord.uid).set(newProfile);
     }
-    // Auth account exists but has no Firestore profile yet (e.g. a prior
-    // partial invite) -- fall through and create the profile below.
   } catch (err: any) {
     if (err instanceof functions.https.HttpsError) {
       throw err;
@@ -1008,24 +1001,23 @@ export const inviteMember = functions.https.onCall(async (data, context) => {
         displayName: fullName,
         emailVerified: false,
       });
+      const newProfile = {
+        uid: userRecord.uid,
+        fullName,
+        email,
+        phoneNumber: phoneNumber || '',
+        photoURL: '',
+        role: 'member',
+        preferredLanguage: 'en',
+        preferredPaymentMethod: 'telebirr',
+        verificationStatus: 'verified',
+        createdAt: new Date().toISOString(),
+      };
+      await db.collection('users').doc(userRecord.uid).set(newProfile);
     } else {
       throw new functions.https.HttpsError('internal', 'Failed to look up or create the user account.');
     }
   }
-
-  const newProfile = {
-    uid: userRecord.uid,
-    fullName,
-    email,
-    phoneNumber: phoneNumber || '',
-    photoURL: '',
-    role: 'member',
-    preferredLanguage: 'en',
-    preferredPaymentMethod: 'telebirr',
-    verificationStatus: 'verified',
-    createdAt: new Date().toISOString(),
-  };
-  await db.collection('users').doc(userRecord.uid).set(newProfile);
 
   // A continue URL so the person lands back in the actual app after setting
   // their password, instead of a bare Firebase confirmation page with no
@@ -1039,11 +1031,13 @@ export const inviteMember = functions.https.onCall(async (data, context) => {
     actorId: context.auth.uid,
     actorName: isSuper ? 'Super Admin' : 'Ekub Admin',
     actorRole: isSuper ? 'super_admin' : 'admin',
-    action: 'MEMBER_INVITED',
+    action: alreadyExisted ? 'MEMBER_INVITE_RESENT' : 'MEMBER_INVITED',
     entityType: 'admin',
     entityId: userRecord.uid,
-    reason: `Invited ${email} to the platform`,
-    newState: { email, fullName },
+    reason: alreadyExisted
+      ? `Re-sent invite to existing account ${email}`
+      : `Invited ${email} (${fullName}) to the platform`,
+    newState: { email, fullName, alreadyExisted },
   });
 
   return { success: true, uid: userRecord.uid, resetLink };

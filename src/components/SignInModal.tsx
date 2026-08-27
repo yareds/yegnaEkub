@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Mail, Lock, User as UserIcon, AlertCircle } from 'lucide-react';
+import { X, Mail, Lock, AlertCircle } from 'lucide-react';
 import { useAuth } from '../firebase/AuthContext';
 import { useTranslation } from '../locales/TranslationContext';
 import { YegnaEkubLogo } from './YegnaEkubLogo';
@@ -9,11 +9,9 @@ interface SignInModalProps {
 }
 
 export const SignInModal: React.FC<SignInModalProps> = ({ onClose }) => {
-  const { signInWithEmail, signUpWithEmail, signInWithGoogle } = useAuth();
+  const { signInWithEmail, signInWithGoogle } = useAuth();
   const { language } = useTranslation();
 
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
-  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -24,11 +22,10 @@ export const SignInModal: React.FC<SignInModalProps> = ({ onClose }) => {
   const friendlyError = (err: unknown): string => {
     const code = (err as { code?: string })?.code || '';
     const msg = (err as Error)?.message || '';
-    if (code.includes('auth/email-already-in-use')) {
-      return isAmharic ? 'ይህ ኢሜይል ቀደም ሲል ተመዝግቧል። እባክዎ ይግቡ።' : 'This email is already registered. Please sign in.';
-    }
-    if (code.includes('auth/weak-password')) {
-      return isAmharic ? 'የይለፍ ቃል ቢያንስ 6 ፊደላት መሆን አለበት።' : 'Password must be at least 6 characters.';
+    if (msg.includes('not been invited') || (err as { name?: string })?.name === 'NotInvitedError') {
+      return isAmharic 
+        ? 'ይህ መለያ ወደ የኛዕቁብ እስካሁን አልተጋበዘም። እባክዎ የዕቁብ አስተዳዳሪዎን ወይም ዋና አስተዳዳሪውን ያነጋግሩ።' 
+        : 'This account has not been invited to YegnaEkub yet. Please contact your Ekub Admin or the Super Admin for an invitation.';
     }
     if (code.includes('auth/invalid-credential') || code.includes('auth/wrong-password') || code.includes('auth/user-not-found')) {
       return isAmharic ? 'የተሳሳተ ኢሜይል ወይም የይለፍ ቃል።' : 'Incorrect email or password.';
@@ -45,11 +42,7 @@ export const SignInModal: React.FC<SignInModalProps> = ({ onClose }) => {
     setError(null);
     setSubmitting(true);
     try {
-      if (mode === 'signup') {
-        await signUpWithEmail(email, password, fullName);
-      } else {
-        await signInWithEmail(email, password);
-      }
+      await signInWithEmail(email, password);
       onClose();
     } catch (err) {
       setError(friendlyError(err));
@@ -85,39 +78,13 @@ export const SignInModal: React.FC<SignInModalProps> = ({ onClose }) => {
         <div className="px-8 pt-8 pb-2 flex flex-col items-center text-center">
           <YegnaEkubLogo variant="full" size="sm" theme="light" showSubtext={false} />
           <h2 className="mt-4 text-lg font-bold text-[#1C1132]">
-            {mode === 'signin' 
-              ? (isAmharic ? 'ወደ መለያዎ ይግቡ' : 'Sign in to your account')
-              : (isAmharic ? 'አዲስ መለያ ይፍጠሩ' : 'Create an Account')}
+            {isAmharic ? 'ወደ መለያዎ ይግቡ' : 'Sign in to your account'}
           </h2>
           <p className="mt-1 text-[11px] text-gray-500 max-w-xs">
             {isAmharic
               ? 'የኢትዮጵያ ዲጂታል የዕቁብና የፋይናንስ ማህበረሰብ መድረክ'
               : 'Ethiopia\u2019s premier digital RoSCA & financial savings community.'}
           </p>
-        </div>
-
-        {/* Tab switch */}
-        <div className="px-8 pt-3">
-          <div className="flex bg-gray-100 p-1 rounded-xl">
-            <button
-              type="button"
-              onClick={() => { setMode('signin'); setError(null); }}
-              className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-                mode === 'signin' ? 'bg-white text-[#1C1132] shadow-sm' : 'text-gray-500 hover:text-gray-800'
-              }`}
-            >
-              {isAmharic ? 'ግባ' : 'Sign In'}
-            </button>
-            <button
-              type="button"
-              onClick={() => { setMode('signup'); setError(null); }}
-              className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-                mode === 'signup' ? 'bg-white text-[#1C1132] shadow-sm' : 'text-gray-500 hover:text-gray-800'
-              }`}
-            >
-              {isAmharic ? 'ተመዝገብ' : 'Create Account'}
-            </button>
-          </div>
         </div>
 
         <div className="px-8 pb-8 pt-4 space-y-4">
@@ -164,20 +131,6 @@ export const SignInModal: React.FC<SignInModalProps> = ({ onClose }) => {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-3">
-            {mode === 'signup' && (
-              <div className="relative">
-                <UserIcon className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  placeholder={isAmharic ? 'ሙሉ ስም' : 'Full Name'}
-                  className="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#7856FF]/40 focus:border-[#7856FF]"
-                  required={mode === 'signup'}
-                />
-              </div>
-            )}
-
             <div className="relative">
               <Mail className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
@@ -210,9 +163,7 @@ export const SignInModal: React.FC<SignInModalProps> = ({ onClose }) => {
             >
               {submitting
                 ? (isAmharic ? 'እባክዎ ይጠብቁ...' : 'Please wait...')
-                : mode === 'signin'
-                  ? (isAmharic ? 'ግባ' : 'Sign In')
-                  : (isAmharic ? 'መለያ ፍጠር' : 'Create Account')}
+                : (isAmharic ? 'ግባ' : 'Sign In')}
             </button>
           </form>
         </div>

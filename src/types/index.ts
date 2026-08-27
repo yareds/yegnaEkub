@@ -19,7 +19,7 @@ export interface UserProfile {
 }
 
 export type EkubStatus = 'draft' | 'recruiting' | 'active' | 'drawing' | 'payout' | 'completed' | 'cancelled';
-export type EkubFrequency = 'weekly' | 'biweekly' | 'monthly';
+export type EkubFrequency = 'daily' | 'weekly' | 'biweekly' | 'monthly';
 
 export interface Ekub {
   id: string;

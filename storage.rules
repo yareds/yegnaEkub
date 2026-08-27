@@ -1,0 +1,26 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Contribution receipts, one folder per Ekub then per member:
+    //   receipts/{ekubId}/{userId}/{fileName}
+    // Only the member who owns this path can upload their own receipt.
+    // Reads are restricted to authenticated users -- the actual "can this
+    // admin see this specific circle's receipts" scoping already happens
+    // at the Firestore layer (the contribution doc that references this
+    // file's URL is itself protected by firestore.rules); this just keeps
+    // the storage bucket itself from being world-readable.
+    match /receipts/{ekubId}/{userId}/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*|application/pdf');
+      allow delete: if false;
+    }
+
+    // Deny everything else by default.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

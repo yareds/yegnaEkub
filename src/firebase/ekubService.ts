@@ -51,7 +51,7 @@ const approvePayoutCallable = httpsCallable<{ ekubId: string; payoutId: string }
 const disbursePayoutCallable = httpsCallable<{ ekubId: string; payoutId: string; paymentReference: string }, { success: boolean; message: string }>(functions, 'disbursePayout');
 const approveMembershipRequestCallable = httpsCallable<{ ekubId: string; userId: string }, { success: boolean; message: string }>(functions, 'approveMembershipRequest');
 const removeEkubMemberCallable = httpsCallable<{ ekubId: string; userId: string }, { success: boolean; message: string }>(functions, 'removeEkubMember');
-const inviteMemberCallable = httpsCallable<{ email: string; fullName: string; phoneNumber?: string }, { success: boolean; uid: string; resetLink: string }>(functions, 'inviteMember');
+const inviteMemberCallable = httpsCallable<{ email: string; fullName: string; phoneNumber?: string }, { success: boolean; uid: string; resetLink: string; alreadyExisted?: boolean }>(functions, 'inviteMember');
 
 // ============================================================================
 // EKUBS
@@ -92,195 +92,47 @@ export const getEkubById = async (id: string): Promise<Ekub | null> => {
   }
 };
 
+/**
+ * Create a new Ekub (Super Admin only).
+ *
+ * NOTE: This action is executed EXCLUSIVELY via the `createEkub` Cloud Function.
+ * Direct Firestore write fallback is strictly forbidden because the Cloud Function
+ * enforces critical business-logic checks (such as preventing the Super Admin from
+ * assigning themselves as an Ekub's Admin), handles atomic membership initialization,
+ * and maintains audit log integrity that client Firestore rules cannot enforce alone.
+ */
 export const createEkub = async (ekubData: Omit<Ekub, 'id' | 'createdAt' | 'currentMemberCount' | 'currentCycle'>): Promise<Ekub> => {
-  // First attempt via Cloud Function
   try {
     const result = await createEkubCallable(ekubData);
     if (result.data?.ekub) {
       return result.data.ekub;
     }
+    throw new Error('Failed to create Ekub.');
   } catch (err: any) {
-    console.warn('createEkub Cloud Function failed, attempting direct Firestore creation for Super Admin:', err);
-  }
-
-  // Direct Firestore fallback for Super Admin (permitted by firestore.rules)
-  try {
-    const currentAuthUser = auth.currentUser;
-    if (!currentAuthUser) {
-      throw new Error('You must be authenticated as Super Admin to create an Ekub.');
-    }
-
-    const ekubId = `ekub-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-    const inviteCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-    const now = new Date().toISOString();
-
-    const newEkub: Ekub = {
-      id: ekubId,
-      ...ekubData,
-      inviteCode,
-      createdAt: now,
-      updatedAt: now,
-      currentMemberCount: ekubData.adminId ? 1 : 0,
-      currentCycle: 1,
-      adminHistory: ekubData.adminId ? [
-        {
-          previousAdminId: '',
-          newAdminId: ekubData.adminId,
-          newAdminName: ekubData.adminName || 'Ekub Admin',
-          assignedAt: now,
-          assignedBy: currentAuthUser.uid,
-        }
-      ] : [],
-    };
-
-    const batch = writeBatch(db);
-    batch.set(doc(db, 'ekubs', ekubId), newEkub);
-
-    if (ekubData.adminId) {
-      const adminMemberRef = doc(db, 'ekubs', ekubId, 'members', ekubData.adminId);
-      const adminMemberDoc: EkubMember = {
-        userId: ekubData.adminId,
-        displayName: ekubData.adminName || 'Ekub Admin',
-        role: 'admin',
-        status: 'active',
-        joinedAt: now,
-        contributionStatus: 'pending',
-        eligibleForDraw: true,
-        hasReceivedPayout: false,
-        totalContributed: 0,
-      };
-      batch.set(adminMemberRef, adminMemberDoc);
-    }
-
-    await batch.commit();
-
-    if (ekubData.adminId) {
-      await addNotification({
-        userId: ekubData.adminId,
-        title: 'Appointed as Ekub Admin',
-        message: `You have been appointed as the Admin for the newly created circle "${newEkub.name}".`,
-        type: 'admin_assigned',
-        read: false,
-        link: '/admin',
-      });
-    }
-
-    return newEkub;
-  } catch (directErr: any) {
-    console.error('Direct Ekub creation failed:', directErr);
-    throw new Error(directErr?.message || 'Failed to create Ekub. Only the Super Admin can create a new Ekub.');
+    console.error('createEkub failed:', err);
+    throw new Error(err?.message || 'Failed to create Ekub.');
   }
 };
 
-// Reassign Ekub Admin (Super Admin only)
+/**
+ * Reassign Ekub Admin (Super Admin only).
+ *
+ * NOTE: This action is executed EXCLUSIVELY via the `assignEkubAdmin` Cloud Function.
+ * Direct Firestore write fallback is strictly forbidden because the Cloud Function
+ * enforces critical business-logic checks (including preventing self-assignment by
+ * Super Admin), updates the previous and new admin member records atomically in a
+ * transaction, and writes server-authoritative audit logs.
+ */
 export const assignEkubAdmin = async (ekubId: string, newAdminUid: string, newAdminName?: string): Promise<boolean> => {
-  // First attempt via Cloud Function
   try {
     const res = await assignEkubAdminCallable({ ekubId, newAdminUid, newAdminName });
     if (res.data?.success) {
       return true;
     }
+    throw new Error('Failed to reassign Ekub Admin.');
   } catch (err: any) {
-    console.warn('Failed to assign Ekub Admin via Cloud Function, falling back to direct Firestore update:', err);
-  }
-
-  // Direct Firestore fallback for Super Admin (permitted by firestore.rules)
-  try {
-    const currentAuthUser = auth.currentUser;
-    if (!currentAuthUser) {
-      throw new Error('You must be authenticated to reassign an Ekub Admin.');
-    }
-
-    const ekubRef = doc(db, 'ekubs', ekubId);
-    const ekubSnap = await getDoc(ekubRef);
-    if (!ekubSnap.exists()) {
-      throw new Error(`Ekub ${ekubId} not found.`);
-    }
-
-    const ekubData = ekubSnap.data() as Ekub;
-    const oldAdminId = ekubData.adminId || '';
-
-    let resolvedAdminName = (newAdminName || '').trim();
-    if (!resolvedAdminName) {
-      try {
-        const userDoc = await getDoc(doc(db, 'users', newAdminUid));
-        if (userDoc.exists()) {
-          const uData = userDoc.data() as any;
-          resolvedAdminName = uData?.fullName || uData?.displayName || '';
-        }
-      } catch (e) {
-        console.warn('Failed to fetch user doc for new admin name:', e);
-      }
-    }
-    if (!resolvedAdminName) {
-      resolvedAdminName = 'Ekub Admin';
-    }
-
-    const historyEntry = {
-      previousAdminId: oldAdminId,
-      newAdminId: newAdminUid,
-      newAdminName: resolvedAdminName,
-      assignedAt: new Date().toISOString(),
-      assignedBy: currentAuthUser.uid,
-    };
-
-    const batch = writeBatch(db);
-
-    // Update Ekub document
-    batch.update(ekubRef, {
-      adminId: newAdminUid,
-      adminName: resolvedAdminName,
-      adminHistory: arrayUnion(historyEntry),
-      updatedAt: new Date().toISOString(),
-    });
-
-    // Demote old admin if applicable
-    if (oldAdminId && oldAdminId !== newAdminUid) {
-      const oldMemberRef = doc(db, 'ekubs', ekubId, 'members', oldAdminId);
-      const oldMemberSnap = await getDoc(oldMemberRef);
-      if (oldMemberSnap.exists()) {
-        batch.update(oldMemberRef, { role: 'member' });
-      }
-    }
-
-    // Update or add new admin in members subcollection
-    const newMemberRef = doc(db, 'ekubs', ekubId, 'members', newAdminUid);
-    const newMemberSnap = await getDoc(newMemberRef);
-    if (newMemberSnap.exists()) {
-      batch.update(newMemberRef, {
-        role: 'admin',
-        status: 'active',
-        displayName: resolvedAdminName,
-      });
-    } else {
-      batch.set(newMemberRef, {
-        userId: newAdminUid,
-        displayName: resolvedAdminName,
-        role: 'admin',
-        status: 'active',
-        joinedAt: new Date().toISOString(),
-        contributionStatus: 'pending',
-        hasReceivedPayout: false,
-        eligibleForDraw: true,
-        totalContributed: 0,
-      });
-    }
-
-    await batch.commit();
-
-    await addNotification({
-      userId: newAdminUid,
-      title: 'Assigned as Ekub Admin',
-      message: `You have been appointed as the Admin for "${ekubData.name}".`,
-      type: 'admin_assigned',
-      read: false,
-      link: '/admin',
-    });
-
-    return true;
-  } catch (fallbackErr: any) {
-    console.error('assignEkubAdmin direct update failed:', fallbackErr);
-    throw new Error(fallbackErr?.message || 'Failed to reassign Ekub Admin. Ensure you have Super Admin privileges.');
+    console.error('assignEkubAdmin failed:', err);
+    throw new Error(err?.message || 'Failed to reassign Ekub Admin.');
   }
 };
 
@@ -445,10 +297,14 @@ export const getAllUsers = async (): Promise<UserProfile[]> => {
   }
 };
 
-export const inviteMember = async (email: string, fullName: string, phoneNumber?: string): Promise<{ uid: string; resetLink: string }> => {
+export const inviteMember = async (email: string, fullName: string, phoneNumber?: string): Promise<{ uid: string; resetLink: string; alreadyExisted?: boolean }> => {
   try {
     const res = await inviteMemberCallable({ email, fullName, phoneNumber });
-    return { uid: res.data.uid, resetLink: res.data.resetLink };
+    return {
+      uid: res.data.uid,
+      resetLink: res.data.resetLink,
+      alreadyExisted: res.data.alreadyExisted,
+    };
   } catch (err: any) {
     console.error('inviteMember failed:', err);
     throw new Error(err?.message || 'Failed to invite member.');
@@ -489,12 +345,24 @@ export const joinEkub = async (ekubId: string, memberData: { userId: string; dis
       return result.data.member;
     }
   } catch (err: any) {
+    if (err?.message?.includes('already a member') || err?.code === 'already-exists') {
+      const memberRef = doc(db, 'ekubs', ekubId, 'members', memberData.userId);
+      const existingSnap = await getDoc(memberRef);
+      if (existingSnap.exists()) {
+        return existingSnap.data() as EkubMember;
+      }
+    }
     console.warn('joinEkub Cloud Function failed, attempting direct Firestore write:', err);
   }
 
   // Direct Firestore write for Admin / Super Admin
   try {
     const memberRef = doc(db, 'ekubs', ekubId, 'members', memberData.userId);
+    const existingSnap = await getDoc(memberRef);
+    if (existingSnap.exists()) {
+      return existingSnap.data() as EkubMember;
+    }
+
     const memberDoc: EkubMember = {
       userId: memberData.userId,
       displayName: memberData.displayName,

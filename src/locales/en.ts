@@ -67,6 +67,7 @@ export const en = {
   cycle: 'Cycle',
   of: 'of',
   frequency: 'Frequency',
+  daily: 'Daily',
   weekly: 'Weekly',
   biweekly: 'Bi-Weekly',
   monthly: 'Monthly',

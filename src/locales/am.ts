@@ -67,6 +67,7 @@ export const am = {
   cycle: 'ዙር',
   of: 'ከ',
   frequency: 'የመክፈያ ጊዜ',
+  daily: 'በየቀኑ',
   weekly: 'በየሳምንቱ',
   biweekly: 'በየሁለት ሳምንቱ',
   monthly: 'በየወሩ',

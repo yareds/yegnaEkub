@@ -50,7 +50,7 @@ service cloud.firestore {
     // Only a Super Admin can grant/revoke this.
     // ==========================================================================
     match /admins/{adminId} {
-      allow read: if isAuthenticated();
+      allow read: if isSuperAdmin();
       allow write: if isSuperAdmin();
     }
 
@@ -61,10 +61,8 @@ service cloud.firestore {
       // Any signed-in user can look up basic profile info
       allow read: if isAuthenticated();
 
-      // A user may create their own profile as 'member', or as 'super_admin' if they qualify
-      allow create: if isOwner(userId) && (
-        request.resource.data.role == 'member' || isSuperAdmin()
-      );
+      allow create: if isOwner(userId) && isSuperAdmin() &&
+        request.resource.data.role == 'super_admin';
 
       // A user may update only their own non-privileged fields.
       allow update: if (

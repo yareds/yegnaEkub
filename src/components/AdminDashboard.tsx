@@ -46,6 +46,7 @@ import {
   approveMembershipRequest,
   removeEkubMember,
   inviteMember,
+  joinEkub,
   getAuditLogs,
   getAllUsers
 } from '../firebase/ekubService';
@@ -299,8 +300,33 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setInviteResult(null);
     try {
       const res = await inviteMember(inviteEmail.trim(), inviteFullName.trim(), invitePhone.trim() || undefined);
+
+      let successMessage = res.alreadyExisted
+        ? `Account for ${inviteFullName.trim()} (${inviteEmail.trim()}) was found. A fresh login/onboarding link has been generated below.`
+        : `Invitation created for ${inviteFullName.trim()} (${inviteEmail.trim()}). Share the onboarding link below.`;
+
+      if (!isSuperAdmin && selectedEkub?.id) {
+        try {
+          await joinEkub(selectedEkub.id, {
+            userId: res.uid,
+            displayName: inviteFullName.trim(),
+            phoneNumber: invitePhone.trim() || undefined,
+          });
+          successMessage = res.alreadyExisted
+            ? `Existing member ${inviteFullName.trim()} (${inviteEmail.trim()}) was added to ${selectedEkub.name}. Share the login link below.`
+            : `Invitation created for ${inviteFullName.trim()} (${inviteEmail.trim()}) and added to ${selectedEkub.name}. Share the onboarding link below.`;
+        } catch (addErr: any) {
+          const errMsg = addErr.message || '';
+          if (errMsg.includes('already a member') || errMsg.includes('already-exists')) {
+            successMessage = `${inviteFullName.trim()} (${inviteEmail.trim()}) is already a member of ${selectedEkub.name}. Share the login link below.`;
+          } else {
+            successMessage = `Account processed for ${inviteFullName.trim()} (${inviteEmail.trim()}), but adding them to ${selectedEkub.name} failed: ${errMsg}. You can add them manually from Circle Roster.`;
+          }
+        }
+      }
+
       setInviteResult({ resetLink: res.resetLink, email: inviteEmail.trim() });
-      setActionSuccess(`Invitation created for ${inviteFullName.trim()} (${inviteEmail.trim()}). Share the onboarding link below.`);
+      setActionSuccess(successMessage);
       setInviteEmail('');
       setInviteFullName('');
       setInvitePhone('');

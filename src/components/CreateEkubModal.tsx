@@ -12,8 +12,8 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../firebase/AuthContext';
 import { useTranslation } from '../locales/TranslationContext';
-import { Ekub, EkubFrequency } from '../types';
-import { createEkub } from '../firebase/ekubService';
+import { Ekub, EkubFrequency, UserProfile } from '../types';
+import { createEkub, getAllUsers } from '../firebase/ekubService';
 import { ETHIOPIAN_BANK_ACCOUNTS } from '../data/demoData';
 
 interface CreateEkubModalProps {
@@ -40,6 +40,24 @@ export const CreateEkubModal: React.FC<CreateEkubModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // Optional: assign the Group Admin right at creation time, when the
+  // person who'll run this circle is already known (the common case --
+  // "one person from the group contacts me" per the intended workflow).
+  // Left blank, the Ekub is created unassigned and can be assigned later
+  // from the Reassign Ekub Admin tab.
+  const [assignAdminNow, setAssignAdminNow] = useState(false);
+  const [selectedAdminUid, setSelectedAdminUid] = useState('');
+  const [selectedAdminName, setSelectedAdminName] = useState('');
+  const [platformUsers, setPlatformUsers] = useState<UserProfile[]>([]);
+  const [loadingPlatformUsers, setLoadingPlatformUsers] = useState(false);
+
+  React.useEffect(() => {
+    if (assignAdminNow && platformUsers.length === 0 && !loadingPlatformUsers) {
+      setLoadingPlatformUsers(true);
+      getAllUsers().then(setPlatformUsers).finally(() => setLoadingPlatformUsers(false));
+    }
+  }, [assignAdminNow]);
+
   const payoutAmount = targetMembers * contributionAmount;
 
   const toggleBank = (code: string) => {
@@ -62,21 +80,26 @@ export const CreateEkubModal: React.FC<CreateEkubModalProps> = ({
       setError('Minimum contribution is 100 ETB.');
       return;
     }
+    if (assignAdminNow && !selectedAdminUid) {
+      setError('Select who should administer this circle, or turn off "Assign Admin now" to leave it unassigned.');
+      return;
+    }
 
     setLoading(true);
     setError('');
 
     try {
       // The calling user (Super Admin) is the creator, but NOT the
-      // initial admin of this specific Ekub -- creatorId is their uid, but
-      // adminId is initialized to empty string (and adminName to 'Unassigned')
-      // until the Super Admin explicitly assigns someone via the Admin Center.
-      // The Super Admin is never a member of any Ekub.
+      // initial admin of this specific Ekub -- creatorId is their uid.
+      // If a real person was picked above, adminId/adminName reflect
+      // them; otherwise the Ekub is created unassigned ('') and can be
+      // assigned later via the Reassign Ekub Admin tab. The Super Admin
+      // is never a member of any Ekub either way.
       const newEkub = await createEkub({
         name: name.trim(),
         description: description.trim() || 'Community RoSCA revolving savings circle.',
-        adminId: '',
-        adminName: 'Unassigned',
+        adminId: assignAdminNow ? selectedAdminUid : '',
+        adminName: assignAdminNow ? selectedAdminName : 'Unassigned',
         creatorId: userProfile?.uid || 'admin',
         totalMembers: targetMembers,
         contributionAmount,
@@ -169,6 +192,55 @@ export const CreateEkubModal: React.FC<CreateEkubModalProps> = ({
                 className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-[#7856FF] focus:bg-white transition-colors"
               />
             </div>
+          </div>
+
+          {/* Assign Group Admin now (optional) */}
+          <div className="p-3.5 bg-[#7856FF]/5 border border-[#7856FF]/20 rounded-xl space-y-3">
+            <label className="flex items-center space-x-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={assignAdminNow}
+                onChange={(e) => { setAssignAdminNow(e.target.checked); setSelectedAdminUid(''); setSelectedAdminName(''); }}
+                className="w-4 h-4 accent-[#7856FF]"
+              />
+              <span className="text-xs font-bold text-[#1C1132]">
+                {language === 'am' ? 'የቡድን አስተዳዳሪውን አሁን ይመድቡ' : 'Assign the Group Admin now'}
+              </span>
+            </label>
+
+            {assignAdminNow && (
+              <>
+                <select
+                  required
+                  value={selectedAdminUid}
+                  onChange={(e) => {
+                    const uid = e.target.value;
+                    setSelectedAdminUid(uid);
+                    setSelectedAdminName(platformUsers.find(u => u.uid === uid)?.fullName || '');
+                  }}
+                  className="w-full px-3.5 py-2.5 bg-white border border-gray-300 rounded-lg text-xs font-bold text-gray-800 focus:outline-none focus:border-[#7856FF]"
+                >
+                  <option value="">
+                    {loadingPlatformUsers ? 'Loading people...' : platformUsers.length === 0 ? 'No invited people yet -- invite them first' : '-- Select the person who contacted you --'}
+                  </option>
+                  {platformUsers.map(u => (
+                    <option key={u.uid} value={u.uid}>{u.fullName} ({u.email})</option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-gray-500">
+                  {language === 'am'
+                    ? 'ገና ካልተጋበዙ፣ ከመፍጠርዎ በፊት በመጀመሪያ ይጋብዙዋቸው (የአባላት ትር)።'
+                    : 'Not seeing them? Invite them first from the Invite Member tab, then come back here.'}
+                </p>
+              </>
+            )}
+            {!assignAdminNow && (
+              <p className="text-[10px] text-gray-500">
+                {language === 'am'
+                  ? 'ይህ ክበብ ሳይመደብ ይፈጠራል -- በኋላ ከ«Reassign Ekub Admin» ትር ማድረግ ይችላሉ።'
+                  : 'This circle will be created unassigned -- you can assign its Admin later from the Reassign Ekub Admin tab.'}
+              </p>
+            )}
           </div>
 
           {/* Members & Contribution Amount */}
