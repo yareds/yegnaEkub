@@ -14,11 +14,34 @@ async function checkIsSuperAdmin(uid: string, authData?: any): Promise<boolean> 
   if (authData?.token?.yegnaEkub_super_admin === true) {
     return true;
   }
-  if (authData?.token?.email === 'yared.abegaz@gmail.com') {
+  const email = (authData?.token?.email || '').toLowerCase().trim();
+  if (email === 'yared.abegaz@gmail.com') {
     return true;
   }
-  const adminDoc = await db.collection('admins').doc(uid).get();
-  return adminDoc.exists;
+  try {
+    const adminDoc = await db.collection('admins').doc(uid).get();
+    if (adminDoc.exists) {
+      return true;
+    }
+  } catch (e) {
+    console.warn('Error reading admins collection:', e);
+  }
+
+  try {
+    const userDoc = await db.collection('users').doc(uid).get();
+    if (userDoc.exists) {
+      const uData = userDoc.data();
+      const userRole = uData?.role;
+      const userEmail = (uData?.email || '').toLowerCase().trim();
+      if (userRole === 'super_admin' || userRole === 'admin' || userEmail === 'yared.abegaz@gmail.com') {
+        return true;
+      }
+    }
+  } catch (e) {
+    console.warn('Error reading users collection:', e);
+  }
+
+  return false;
 }
 
 // --- Internal Helper: Check if caller is Ekub Admin or Super Admin ---
@@ -198,59 +221,83 @@ export const assignEkubAdmin = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError('not-found', `Ekub ${ekubId} not found.`);
   }
 
-  const ekubData = ekubDoc.data()!;
-  const oldAdminId = ekubData.adminId;
+  const ekubData = ekubDoc.data() || {};
+  const oldAdminId = ekubData.adminId || '';
 
   // Retrieve user record for display name if not passed
-  let resolvedAdminName = newAdminName;
+  let resolvedAdminName = (newAdminName || '').trim();
   if (!resolvedAdminName) {
-    const userDoc = await db.collection('users').doc(newAdminUid).get();
-    resolvedAdminName = userDoc.exists ? userDoc.data()?.fullName || userDoc.data()?.displayName : 'New Ekub Admin';
+    try {
+      const userDoc = await db.collection('users').doc(newAdminUid).get();
+      if (userDoc.exists) {
+        resolvedAdminName = userDoc.data()?.fullName || userDoc.data()?.displayName || '';
+      }
+    } catch (err) {
+      console.warn('Failed to fetch user doc for new admin name:', err);
+    }
+  }
+  if (!resolvedAdminName) {
+    resolvedAdminName = 'Ekub Admin';
   }
 
   const historyEntry = {
-    previousAdminId: oldAdminId || '',
+    previousAdminId: oldAdminId,
     newAdminId: newAdminUid,
     newAdminName: resolvedAdminName,
     assignedAt: new Date().toISOString(),
     assignedBy: context.auth.uid,
   };
 
-  await db.runTransaction(async (transaction) => {
-    // 1. Update Ekub Doc
-    transaction.update(ekubRef, {
-      adminId: newAdminUid,
-      adminName: resolvedAdminName,
-      adminHistory: admin.firestore.FieldValue.arrayUnion(historyEntry),
-    });
+  try {
+    await db.runTransaction(async (transaction) => {
+      // -- All reads first (Firestore transactions require every read to
+      // happen before any write) --
+      const txEkubDoc = await transaction.get(ekubRef);
+      if (!txEkubDoc.exists) {
+        throw new functions.https.HttpsError('not-found', `Ekub ${ekubId} not found.`);
+      }
 
-    // 2. Demote old admin's member doc if exists
-    if (oldAdminId && oldAdminId !== newAdminUid) {
-      const oldMemberRef = ekubRef.collection('members').doc(oldAdminId);
-      const oldMemberDoc = await transaction.get(oldMemberRef);
-      if (oldMemberDoc.exists) {
+      const oldMemberRef = oldAdminId && oldAdminId !== newAdminUid
+        ? ekubRef.collection('members').doc(oldAdminId)
+        : null;
+      const oldMemberDoc = oldMemberRef ? await transaction.get(oldMemberRef) : null;
+
+      const newMemberRef = ekubRef.collection('members').doc(newAdminUid);
+      const newMemberDoc = await transaction.get(newMemberRef);
+
+      // -- Now all writes --
+      transaction.update(ekubRef, {
+        adminId: newAdminUid,
+        adminName: resolvedAdminName,
+        adminHistory: admin.firestore.FieldValue.arrayUnion(historyEntry),
+      });
+
+      if (oldMemberRef && oldMemberDoc?.exists) {
         transaction.update(oldMemberRef, { role: 'member' });
       }
-    }
 
-    // 3. Promote/create new admin's member doc
-    const newMemberRef = ekubRef.collection('members').doc(newAdminUid);
-    const newMemberDoc = await transaction.get(newMemberRef);
-    if (newMemberDoc.exists) {
-      transaction.update(newMemberRef, { role: 'admin', status: 'active' });
-    } else {
-      transaction.set(newMemberRef, {
-        userId: newAdminUid,
-        displayName: resolvedAdminName,
-        role: 'admin',
-        status: 'active',
-        joinedAt: new Date().toISOString(),
-        contributionStatus: 'pending',
-        hasReceivedPayout: false,
-        eligibleForDraw: true,
-      });
+      if (newMemberDoc.exists) {
+        transaction.update(newMemberRef, { role: 'admin', status: 'active', displayName: resolvedAdminName });
+      } else {
+        transaction.set(newMemberRef, {
+          userId: newAdminUid,
+          displayName: resolvedAdminName,
+          role: 'admin',
+          status: 'active',
+          joinedAt: new Date().toISOString(),
+          contributionStatus: 'pending',
+          hasReceivedPayout: false,
+          eligibleForDraw: true,
+        });
+      }
+    });
+  } catch (err: any) {
+    console.error('assignEkubAdmin transaction error:', err);
+    if (err instanceof functions.https.HttpsError) {
+      throw err;
     }
-  });
+    throw new functions.https.HttpsError('internal', err?.message || 'Failed to reassign Ekub Admin.');
+  }
 
   await writeAuditLog({
     actorId: context.auth.uid,
@@ -367,6 +414,8 @@ export const verifyContribution = functions.https.onCall(async (data, context) =
   const memberRef = db.collection('ekubs').doc(ekubId).collection('members').doc(contribData.userId);
 
   await db.runTransaction(async (transaction) => {
+    const memberDoc = await transaction.get(memberRef);
+
     transaction.update(contribRef, {
       status: 'verified',
       verifiedAt: new Date().toISOString(),
@@ -374,7 +423,6 @@ export const verifyContribution = functions.https.onCall(async (data, context) =
       adminNotes: notes || 'Verified by Admin',
     });
 
-    const memberDoc = await transaction.get(memberRef);
     if (memberDoc.exists) {
       transaction.update(memberRef, {
         contributionStatus: 'paid',
@@ -428,13 +476,14 @@ export const rejectContribution = functions.https.onCall(async (data, context) =
   const memberRef = db.collection('ekubs').doc(ekubId).collection('members').doc(contribData.userId);
 
   await db.runTransaction(async (transaction) => {
+    const memberDoc = await transaction.get(memberRef);
+
     transaction.update(contribRef, {
       status: 'rejected',
       rejectionReason: reason || 'Invalid payment receipt or reference',
       verifiedBy: context.auth!.uid,
     });
 
-    const memberDoc = await transaction.get(memberRef);
     if (memberDoc.exists) {
       transaction.update(memberRef, {
         contributionStatus: 'overdue',

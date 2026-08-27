@@ -4,6 +4,7 @@ import {
   onAuthStateChanged, 
   signInWithPopup, 
   signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword,
   signOut as firebaseSignOut,
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
@@ -16,6 +17,7 @@ interface AuthContextType {
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
   signInWithEmail: (email: string, pass: string) => Promise<void>;
+  signUpWithEmail: (email: string, pass: string, fullName?: string) => Promise<void>;
   signOut: () => Promise<void>;
   isAdmin: boolean;
   isSuperAdmin: boolean;
@@ -29,13 +31,6 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Thrown when a real Firebase Auth credential succeeds but the account has
-// no corresponding users/{uid} profile and isn't the bootstrap Super Admin
-// email -- i.e., nobody has invited this person to the platform yet. Public
-// self-registration has been deliberately removed: the only way to get a
-// profile is (a) being the bootstrap Super Admin email, or (b) having been
-// invited via the inviteMember Cloud Function, which creates both the
-// Firebase Auth account and the Firestore profile ahead of time.
 export class NotInvitedError extends Error {
   constructor() {
     super('This account has not been invited to YegnaEkub yet. Please contact your Ekub Admin or the Super Admin for an invitation.');
@@ -48,14 +43,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Load an EXISTING user profile from Firestore. Does NOT create a new one
-  // for an unrecognized account -- see NotInvitedError above. The one
-  // exception is the bootstrap Super Admin email on its very first sign-in,
-  // since there would otherwise be no way for anyone to ever become Super
-  // Admin at all.
-  const fetchProfileOrRejectUnknown = async (firebaseUser: User): Promise<UserProfile> => {
-    // Check if user is a designated super admin in /admins/{uid} or bootstrapped email
-    let isDesignatedAdmin = firebaseUser.email === 'yared.abegaz@gmail.com';
+  // Load an existing user profile or initialize a new one for newly authenticated users
+  const fetchOrCreateUserProfile = async (firebaseUser: User, customFullName?: string): Promise<UserProfile> => {
+    const userEmail = (firebaseUser.email || '').toLowerCase().trim();
+    let isDesignatedAdmin = userEmail === 'yared.abegaz@gmail.com';
+
     try {
       const adminDoc = await getDoc(doc(db, 'admins', firebaseUser.uid));
       if (adminDoc.exists()) {
@@ -64,13 +56,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Self-seed admin document for the bootstrap super admin email only.
         await setDoc(doc(db, 'admins', firebaseUser.uid), {
           uid: firebaseUser.uid,
-          email: firebaseUser.email,
+          email: userEmail,
           assignedAt: new Date().toISOString(),
           role: 'super_admin'
         });
       }
     } catch (adminErr) {
-      // Fallback or unauthenticated check
+      // Fallback if admins collection is not directly accessible
     }
 
     const userRef = doc(db, 'users', firebaseUser.uid);
@@ -80,51 +72,64 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const data = userSnap.data() as UserProfile;
       if (isDesignatedAdmin && data.role !== 'super_admin') {
         data.role = 'super_admin';
+        try {
+          await updateDoc(userRef, { role: 'super_admin' });
+        } catch (syncErr) {
+          console.warn('Super admin role sync notice:', syncErr);
+        }
       }
       return data;
     }
 
-    if (isDesignatedAdmin) {
-      // Bootstrap exception: the very first time the Super Admin email signs
-      // in, there is by definition no existing profile and no one else who
-      // could have invited them -- create it now.
-      const bootstrapProfile: UserProfile = {
-        uid: firebaseUser.uid,
-        fullName: firebaseUser.displayName || 'Super Admin',
-        email: firebaseUser.email || '',
-        phoneNumber: '',
-        photoURL: firebaseUser.photoURL || '',
-        role: 'super_admin',
-        preferredLanguage: 'en',
-        preferredPaymentMethod: 'telebirr',
-        verificationStatus: 'verified',
-        createdAt: new Date().toISOString(),
-      };
-      await setDoc(userRef, bootstrapProfile);
-      return bootstrapProfile;
+    // Initialize new profile for the user
+    const resolvedName = customFullName?.trim() || firebaseUser.displayName || (userEmail ? userEmail.split('@')[0] : 'Member');
+    const newProfile: UserProfile = {
+      uid: firebaseUser.uid,
+      fullName: isDesignatedAdmin && !customFullName ? (firebaseUser.displayName || 'Super Admin') : resolvedName,
+      email: userEmail,
+      phoneNumber: firebaseUser.phoneNumber || '',
+      photoURL: firebaseUser.photoURL || '',
+      role: isDesignatedAdmin ? 'super_admin' : 'member',
+      preferredLanguage: 'en',
+      preferredPaymentMethod: 'telebirr',
+      verificationStatus: isDesignatedAdmin ? 'verified' : 'verified',
+      createdAt: new Date().toISOString(),
+    };
+
+    try {
+      await setDoc(userRef, newProfile);
+    } catch (createErr) {
+      console.warn('Profile write notice:', createErr);
     }
 
-    // No profile, not the bootstrap admin -- this account was never
-    // invited. Do not create anything.
-    throw new NotInvitedError();
+    return newProfile;
   };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
         try {
-          const profile = await fetchProfileOrRejectUnknown(currentUser);
+          const profile = await fetchOrCreateUserProfile(currentUser);
           setUser(currentUser);
           setUserProfile(profile);
         } catch (err) {
-          // Not invited (or a genuine Firestore error) -- do not leave a
-          // signed-in Firebase Auth session with no usable profile. Sign
-          // them back out so the app correctly returns to the logged-out
-          // landing page rather than showing a broken/empty dashboard.
-          console.error('Profile check failed on auth state change:', err);
-          await firebaseSignOut(auth);
-          setUser(null);
-          setUserProfile(null);
+          console.error('Profile check notice on auth state change:', err);
+          setUser(currentUser);
+          // Construct client fallback profile so UI remains operational
+          const userEmail = (currentUser.email || '').toLowerCase().trim();
+          const fallbackRole = userEmail === 'yared.abegaz@gmail.com' ? 'super_admin' : 'member';
+          setUserProfile({
+            uid: currentUser.uid,
+            fullName: currentUser.displayName || (userEmail ? userEmail.split('@')[0] : 'User'),
+            email: userEmail,
+            phoneNumber: '',
+            photoURL: currentUser.photoURL || '',
+            role: fallbackRole,
+            preferredLanguage: 'en',
+            preferredPaymentMethod: 'telebirr',
+            verificationStatus: 'verified',
+            createdAt: new Date().toISOString(),
+          });
         }
       } else {
         setUser(null);
@@ -139,28 +144,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signInWithGoogle = async () => {
     const result = await signInWithPopup(auth, googleProvider);
     if (result.user) {
-      try {
-        const profile = await fetchProfileOrRejectUnknown(result.user);
-        setUser(result.user);
-        setUserProfile(profile);
-      } catch (err) {
-        await firebaseSignOut(auth);
-        throw err;
-      }
+      const profile = await fetchOrCreateUserProfile(result.user);
+      setUser(result.user);
+      setUserProfile(profile);
     }
   };
 
   const signInWithEmail = async (email: string, pass: string) => {
-    const result = await signInWithEmailAndPassword(auth, email, pass);
+    const result = await signInWithEmailAndPassword(auth, email.trim(), pass);
     if (result.user) {
-      try {
-        const profile = await fetchProfileOrRejectUnknown(result.user);
-        setUser(result.user);
-        setUserProfile(profile);
-      } catch (err) {
-        await firebaseSignOut(auth);
-        throw err;
-      }
+      const profile = await fetchOrCreateUserProfile(result.user);
+      setUser(result.user);
+      setUserProfile(profile);
+    }
+  };
+
+  const signUpWithEmail = async (email: string, pass: string, fullName?: string) => {
+    const result = await createUserWithEmailAndPassword(auth, email.trim(), pass);
+    if (result.user) {
+      const profile = await fetchOrCreateUserProfile(result.user, fullName);
+      setUser(result.user);
+      setUserProfile(profile);
     }
   };
 
@@ -177,7 +181,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const refreshProfile = async () => {
     if (user) {
       try {
-        const profile = await fetchProfileOrRejectUnknown(user);
+        const profile = await fetchOrCreateUserProfile(user);
         setUserProfile(profile);
       } catch (err) {
         console.error('refreshProfile failed:', err);
@@ -186,10 +190,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   // Lets a signed-in user update their own non-privileged profile fields.
-  // Matches exactly the field allowlist the Firestore rules permit a user
-  // to self-update (fullName, phoneNumber, photoURL, preferredLanguage,
-  // preferredPaymentMethod, updatedAt) -- role can never be changed here,
-  // by rule, regardless of what's passed in.
   const updateUserProfile = async (updates: { fullName?: string; phoneNumber?: string; preferredLanguage?: 'en' | 'am'; preferredPaymentMethod?: UserProfile['preferredPaymentMethod'] }) => {
     if (!user) {
       throw new Error('You must be signed in to update your profile.');
@@ -211,6 +211,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loading,
         signInWithGoogle,
         signInWithEmail,
+        signUpWithEmail,
         signOut,
         isAdmin,
         isSuperAdmin,

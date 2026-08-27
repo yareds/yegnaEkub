@@ -231,6 +231,8 @@ export interface Payout {
 export type NotificationType = 
   | 'ekub_invite'
   | 'membership_approval'
+  | 'member_joined'
+  | 'admin_assigned'
   | 'contribution_reminder'
   | 'payment_submitted'
   | 'payment_verified'
