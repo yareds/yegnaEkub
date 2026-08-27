@@ -128,7 +128,7 @@ service cloud.firestore {
         // (admin-initiated) or the self-request path below (member-
         // initiated, always starts 'pending' and never draw-eligible until
         // an admin accepts it via the approveMembershipRequest function).
-        allow create: if isSuperAdmin() || isEkubAdmin(ekubId) || (
+        allow create: if isEkubAdmin(ekubId) || (
           isOwner(memberId) &&
           request.resource.data.status == 'pending' &&
           request.resource.data.role == 'member' &&
@@ -136,10 +136,10 @@ service cloud.firestore {
           request.resource.data.eligibleForDraw == false
         );
 
-        // The Ekub Admin/Super Admin can update anything on a member doc.
+        // The Ekub Admin can update anything on a member doc.
         // The member themself may only touch their own display fields --
         // never role, status, eligibility, or contribution/payout state.
-        allow update: if isSuperAdmin() || isEkubAdmin(ekubId) || (
+        allow update: if isEkubAdmin(ekubId) || (
           isOwner(memberId) &&
           request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['displayName', 'photoURL', 'phoneNumber'])
@@ -167,7 +167,7 @@ service cloud.firestore {
 
         // Verifying/rejecting a contribution is admin-only -- members cannot
         // edit their own submission after the fact.
-        allow update: if isSuperAdmin() || isEkubAdmin(ekubId);
+        allow update: if isEkubAdmin(ekubId);
         allow delete: if isSuperAdmin();
       }
 
@@ -193,7 +193,7 @@ service cloud.firestore {
         // documents/account details, and may move status forward from
         // 'documents_required' to 'under_review' ONLY (never to 'approved'
         // or 'paid' -- those transitions are admin/Cloud-Function-only).
-        allow update: if isSuperAdmin() || isEkubAdmin(ekubId) || (
+        allow update: if isEkubAdmin(ekubId) || (
           isAuthenticated() && resource.data.winnerId == request.auth.uid &&
           request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['submittedDocuments', 'payoutAccountDetails', 'updatedAt', 'status']) &&
