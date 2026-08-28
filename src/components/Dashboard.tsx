@@ -316,7 +316,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <div>
                   <h3 className="text-lg font-bold text-[#1C1132]">{activeEkub.name}</h3>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    {activeEkub.frequency.toUpperCase()} Cycle • {activeEkub.contributionAmount.toLocaleString()} ETB / Member
+                    {(activeEkub.frequency || 'WEEKLY').toUpperCase()} Cycle • {activeEkub.contributionAmount.toLocaleString()} ETB / Member
                   </p>
                 </div>
                 <div className="flex items-center gap-2">

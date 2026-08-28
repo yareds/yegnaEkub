@@ -20,12 +20,14 @@ import {
 import { useAuth } from '../firebase/AuthContext';
 import { useTranslation } from '../locales/TranslationContext';
 import { Ekub } from '../types';
+import { seedSampleData } from '../firebase/ekubService';
 
 interface SuperAdminDashboardProps {
   ekubs: Ekub[];
   onSelectEkub: (ekub: Ekub) => void;
   onOpenCreateEkub: () => void;
   onNavigateTab: (tab: string) => void;
+  onRefreshData?: () => void;
 }
 
 // Tailored home dashboard for the Super Admin. The Super Admin is never a
@@ -39,9 +41,34 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   onSelectEkub,
   onOpenCreateEkub,
   onNavigateTab,
+  onRefreshData,
 }) => {
   const { userProfile } = useAuth();
   const { t, language } = useTranslation();
+
+  const [seedingData, setSeedingData] = useState(false);
+  const [showSeedConfirmModal, setShowSeedConfirmModal] = useState(false);
+  const [actionSuccess, setActionSuccess] = useState('');
+  const [actionError, setActionError] = useState('');
+
+  const handleExecuteSeedSampleData = async () => {
+    setSeedingData(true);
+    setActionError('');
+    setActionSuccess('');
+    try {
+      const circles = await seedSampleData();
+      setShowSeedConfirmModal(false);
+      setActionSuccess(
+        `Successfully generated ${circles.length} sample circles: ` +
+        circles.map(c => `${c.name} (${c.memberCount} members, Admin: ${c.adminEmail})`).join('; ')
+      );
+      if (onRefreshData) onRefreshData();
+    } catch (err: any) {
+      setActionError(err.message || 'Failed to generate sample data.');
+    } finally {
+      setSeedingData(false);
+    }
+  };
 
   const totalCircles = ekubs.length;
   const activeCircles = ekubs.filter(e => e.status === 'active').length;
@@ -82,6 +109,16 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
             </button>
 
             <button
+              onClick={() => setShowSeedConfirmModal(true)}
+              disabled={seedingData}
+              className="px-4 py-2.5 bg-white/10 hover:bg-white/15 text-white border border-[#7856FF]/40 font-bold text-xs uppercase tracking-widest transition-all flex items-center space-x-1.5 rounded-lg disabled:opacity-50"
+              title="Generate sample circles with distinct admin accounts"
+            >
+              <Sparkles className="w-4 h-4 text-[#C4B5FD]" />
+              <span>{seedingData ? 'Generating...' : 'Generate Sample Data'}</span>
+            </button>
+
+            <button
               onClick={() => onNavigateTab('admin')}
               className="px-4 py-2.5 bg-white/10 hover:bg-white/15 text-[#C4B5FD] border border-[#7856FF]/40 font-bold text-xs uppercase tracking-widest transition-all flex items-center space-x-1.5 rounded-lg"
             >
@@ -91,6 +128,31 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Action Banners */}
+      {actionSuccess && (
+        <div className="p-4 bg-green-50 border border-green-200 text-green-800 rounded-xl text-xs flex items-center justify-between shadow-sm animate-in fade-in">
+          <div className="flex items-center space-x-2">
+            <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
+            <span>{actionSuccess}</span>
+          </div>
+          <button onClick={() => setActionSuccess('')} className="text-green-600 hover:text-green-800 font-bold ml-2">
+            &times;
+          </button>
+        </div>
+      )}
+
+      {actionError && (
+        <div className="p-4 bg-red-50 border border-red-200 text-red-800 rounded-xl text-xs flex items-center justify-between shadow-sm animate-in fade-in">
+          <div className="flex items-center space-x-2">
+            <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+            <span>{actionError}</span>
+          </div>
+          <button onClick={() => setActionError('')} className="text-red-600 hover:text-red-800 font-bold ml-2">
+            &times;
+          </button>
+        </div>
+      )}
 
       {/* Platform-Wide Key Metrics */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -194,7 +256,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                       </span>
                     </td>
                     <td className="py-3 px-4 uppercase font-bold text-gray-700">{e.frequency}</td>
-                    <td className="py-3 px-4 font-mono">Cycle #{e.currentCycle} / {e.totalMembers}</td>
+                    <td className="py-3 px-4 font-mono">Cycle #{e.currentCycle} &middot; {e.currentMemberCount ?? 0}/{e.memberLimit ?? '?'} members</td>
                     <td className="py-3 px-4 font-mono font-bold text-gray-900">{e.payoutAmount.toLocaleString()} ETB</td>
                     <td className="py-3 px-4">
                       <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-green-50 text-green-700 border border-green-200">
@@ -216,6 +278,96 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
           </div>
         )}
       </div>
+
+      {/* SAMPLE DATA GENERATION MODAL */}
+      {showSeedConfirmModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white max-w-lg w-full p-6 sm:p-7 rounded-2xl border border-[#E6E1F5] shadow-2xl space-y-5 text-gray-900 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-start">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-xl bg-[#7856FF]/10 text-[#7856FF] flex items-center justify-center">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-[#1C1132]">Generate Sample Circles &amp; Admins</h3>
+                  <p className="text-xs text-gray-500">Platform Demonstration &amp; Testing Suite</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => !seedingData && setShowSeedConfirmModal(false)} 
+                disabled={seedingData}
+                className="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-30"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-600 leading-relaxed">
+              This will provision <strong>3 realistic Ethiopian Ekub circles</strong> with complete member rosters and dedicated Circle Administrator accounts:
+            </p>
+
+            <div className="space-y-2.5">
+              <div className="p-3 bg-[#F8F7FC] border border-[#E6E1F5] rounded-xl text-xs space-y-1">
+                <div className="flex justify-between font-bold text-gray-900">
+                  <span>1. Bole Daily Savers</span>
+                  <span className="text-[#7856FF] uppercase text-[10px]">Daily &middot; 10 Members</span>
+                </div>
+                <p className="text-gray-500 text-[11px]">500 ETB / day &middot; 5,000 ETB pool &middot; Admin: Abebe Bekele (<code>admin.bole.daily@yegnaekub-demo.et</code>)</p>
+              </div>
+
+              <div className="p-3 bg-[#F8F7FC] border border-[#E6E1F5] rounded-xl text-xs space-y-1">
+                <div className="flex justify-between font-bold text-gray-900">
+                  <span>2. Merkato Weekly Circle</span>
+                  <span className="text-[#7856FF] uppercase text-[10px]">Weekly &middot; 20 Members</span>
+                </div>
+                <p className="text-gray-500 text-[11px]">2,000 ETB / week &middot; 40,000 ETB pool &middot; Admin: Selamawit Tesfaye (<code>admin.merkato.weekly@yegnaekub-demo.et</code>)</p>
+              </div>
+
+              <div className="p-3 bg-[#F8F7FC] border border-[#E6E1F5] rounded-xl text-xs space-y-1">
+                <div className="flex justify-between font-bold text-gray-900">
+                  <span>3. Piazza Monthly Cooperative</span>
+                  <span className="text-[#7856FF] uppercase text-[10px]">Monthly &middot; 30 Members</span>
+                </div>
+                <p className="text-gray-500 text-[11px]">5,000 ETB / month &middot; 150,000 ETB pool &middot; Admin: Dawit Alemu (<code>admin.piazza.monthly@yegnaekub-demo.et</code>)</p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-purple-50 border border-purple-100 rounded-xl text-[11px] text-purple-900 flex items-start space-x-2">
+              <ShieldCheck className="w-4 h-4 text-[#7856FF] shrink-0 mt-0.5" />
+              <span>The Super Admin is maintained as a platform-level observer and is never enrolled as a member.</span>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                disabled={seedingData}
+                onClick={() => setShowSeedConfirmModal(false)}
+                className="flex-1 py-2.5 text-xs font-bold uppercase tracking-wider text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={seedingData}
+                onClick={handleExecuteSeedSampleData}
+                className="flex-1 py-2.5 text-xs font-bold uppercase tracking-wider text-white bg-[#7856FF] hover:bg-[#6340FF] rounded-xl shadow-md shadow-[#7856FF]/25 transition-all flex items-center justify-center space-x-2 disabled:opacity-50"
+              >
+                {seedingData ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent animate-spin rounded-full" />
+                    <span>Provisioning Circles...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4" />
+                    <span>Confirm &amp; Generate</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

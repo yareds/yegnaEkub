@@ -249,8 +249,8 @@ export const ContributeModal: React.FC<ContributeModalProps> = ({
                           : 'border-[#E6E1F5] bg-white hover:bg-gray-50'
                       }`}
                     >
-                      <p className="font-bold text-gray-900 truncate">{bank.name.split('(')[0]}</p>
-                      <p className="text-[10px] text-gray-500 truncate uppercase tracking-wider">{bank.code.toUpperCase()}</p>
+                      <p className="font-bold text-gray-900 truncate">{(bank.name || '').split('(')[0]}</p>
+                      <p className="text-[10px] text-gray-500 truncate uppercase tracking-wider">{(bank.code || '').toUpperCase()}</p>
                     </button>
                   ))}
                 </div>

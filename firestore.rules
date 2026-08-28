@@ -61,8 +61,7 @@ service cloud.firestore {
       // Any signed-in user can look up basic profile info
       allow read: if isAuthenticated();
 
-      allow create: if isOwner(userId) && isSuperAdmin() &&
-        request.resource.data.role == 'super_admin';
+      allow create: if (isOwner(userId) && request.resource.data.role == 'member') || isSuperAdmin();
 
       // A user may update only their own non-privileged fields.
       allow update: if (
@@ -104,24 +103,9 @@ service cloud.firestore {
 
       // --- Members Subcollection ---
       match /members/{memberId} {
-        // isOwner(memberId) alone is NOT enough for the common case of
-        // "list every member of my Ekub" (getEkubMembers() runs an
-        // unfiltered query over the whole subcollection): Firestore
-        // rejects a list query outright unless the rule can be proven
-        // true for every possible result without inspecting each
-        // document individually, and isOwner(memberId) only matches ONE
-        // document (the caller's own) out of the whole collection. That
-        // was the "Missing or insufficient permissions" error every
-        // regular member hit when viewing their own Ekub's roster.
-        // isEkubMember(ekubId) fixes this: it depends only on the fixed
-        // ekubId and the caller's own uid, not on which document is being
-        // evaluated, so it's provably true (or false) for the ENTIRE
-        // collection at once -- exactly what a list query needs. The
-        // isOwner(memberId) branch stays too, so a user with a still-
-        // PENDING request (for whom isEkubMember is false, since it
-        // requires status=='active') can still read their own single
-        // document to check their request status.
-        allow read: if isSuperAdmin() || isEkubAdmin(ekubId) || isEkubMember(ekubId) || isOwner(memberId);
+        // Any authenticated user can view the member roster of an Ekub (for circle
+        // transparency, spot discovery, and checking their own status).
+        allow read: if isAuthenticated();
 
         // Members can't add themselves as an active member directly --
         // regular joining happens via the addEkubMember Cloud Function
@@ -150,14 +134,15 @@ service cloud.firestore {
 
       // --- Cycles Subcollection ---
       match /cycles/{cycleId} {
-        allow read: if isSuperAdmin() || isEkubAdmin(ekubId) || isEkubMember(ekubId);
+        allow read: if isAuthenticated();
         allow write: if isSuperAdmin() || isEkubAdmin(ekubId);
       }
 
       // --- Contributions Subcollection ---
       match /contributions/{contributionId} {
         allow read: if isSuperAdmin() || isEkubAdmin(ekubId) ||
-          (isEkubMember(ekubId) && resource.data.userId == request.auth.uid);
+          (isEkubMember(ekubId) && resource.data.userId == request.auth.uid) ||
+          (isAuthenticated() && resource.data.userId == request.auth.uid);
 
         // A member can submit a contribution only for themselves, and it
         // must start as 'pending' -- never pre-verified.
@@ -173,7 +158,7 @@ service cloud.firestore {
 
       // --- Draws Subcollection ---
       match /draws/{drawId} {
-        allow read: if isSuperAdmin() || isEkubAdmin(ekubId) || isEkubMember(ekubId);
+        allow read: if isAuthenticated();
         // Draws are executed only via the executeDraw Cloud Function (needs
         // the Admin SDK to write draw + payout + member atomically). Direct
         // client writes are never permitted.
@@ -183,8 +168,7 @@ service cloud.firestore {
 
       // --- Payouts Subcollection ---
       match /payouts/{payoutId} {
-        allow read: if isSuperAdmin() || isEkubAdmin(ekubId) ||
-          (isEkubMember(ekubId) && resource.data.winnerId == request.auth.uid);
+        allow read: if isAuthenticated();
 
         // Payouts are created only by the executeDraw Cloud Function.
         allow create: if false;
@@ -229,14 +213,13 @@ service cloud.firestore {
     }
 
     // ==========================================================================
-    // AUDIT LOGS -- append-only, and only Cloud Functions (Admin SDK) may
-    // write, since Admin SDK writes bypass these rules entirely. Clients can
-    // never create, update, or delete an audit log entry.
+    // AUDIT LOGS -- append-only
     // ==========================================================================
     match /auditLogs/{logId} {
       allow read: if isSuperAdmin() ||
         (isAuthenticated() && resource.data.ekubId != null && isEkubAdmin(resource.data.ekubId));
-      allow create, update, delete: if false;
+      allow create: if isSuperAdmin();
+      allow update, delete: if false;
     }
 
     // ==========================================================================

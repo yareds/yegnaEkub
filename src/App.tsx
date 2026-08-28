@@ -279,6 +279,7 @@ function MainAppContent() {
                   onSelectEkub={handleSelectEkub}
                   onOpenCreateEkub={() => setShowCreateEkub(true)}
                   onNavigateTab={handleNavigate}
+                  onRefreshData={refreshAllData}
                 />
               ) : (
                 <Dashboard

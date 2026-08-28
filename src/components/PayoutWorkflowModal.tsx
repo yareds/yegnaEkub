@@ -162,7 +162,7 @@ export const PayoutWorkflowModal: React.FC<PayoutWorkflowModalProps> = ({
                   </p>
                 </div>
                 <span className="px-2.5 py-1 text-[10px] font-bold bg-amber-100 text-amber-800 uppercase tracking-wider rounded-lg border border-amber-200">
-                  {payout.status.replace('_', ' ')}
+                  {(payout.status || '').replace(/_/g, ' ')}
                 </span>
               </div>
 

@@ -211,8 +211,8 @@ export const DisputeCenter: React.FC<DisputeCenterProps> = ({
                   </div>
                   <p className="text-gray-600">{t.description}</p>
                   <div className="flex items-center justify-between text-[10px] text-gray-400 pt-1">
-                    <span>Ticket #{t.ticketId} • {t.category.toUpperCase()}</span>
-                    <span>{t.createdAt.split('T')[0]}</span>
+                    <span>Ticket #{t.ticketId} • {(t.category || 'SUPPORT').toUpperCase()}</span>
+                    <span>{t.createdAt ? t.createdAt.split('T')[0] : 'Recent'}</span>
                   </div>
                 </div>
               ))}

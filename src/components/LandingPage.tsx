@@ -436,7 +436,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           {ETHIOPIAN_BANK_ACCOUNTS.map((bank) => (
             <div key={bank.code} className="bg-white p-4 border border-[#E6E1F5] rounded-xl shadow-sm flex flex-col items-center justify-center text-center">
               <Building2 className="w-5 h-5 text-[#7856FF] mb-2" />
-              <p className="text-xs font-bold text-gray-900">{bank.name.split('(')[0]}</p>
+              <p className="text-xs font-bold text-gray-900">{(bank.name || '').split('(')[0]}</p>
               <p className="text-[10px] text-gray-500 mt-0.5">Acc: {bank.accountNumber}</p>
             </div>
           ))}

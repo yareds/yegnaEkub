@@ -111,7 +111,7 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
                     <p className="font-bold text-[#1C1132]">{n.title}</p>
                     <p className="text-gray-600 mt-0.5 leading-relaxed">{n.message}</p>
                     <p className="text-[10px] text-gray-400 mt-1.5 font-mono">
-                      {n.createdAt.replace('T', ' ').substring(0, 16)}
+                      {n.createdAt ? n.createdAt.replace('T', ' ').substring(0, 16) : 'Recent'}
                     </p>
                   </div>
                 </div>

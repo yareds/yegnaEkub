@@ -48,7 +48,8 @@ import {
   inviteMember,
   joinEkub,
   getAuditLogs,
-  getAllUsers
+  getAllUsers,
+  seedSampleData
 } from '../firebase/ekubService';
 import { ETHIOPIAN_BANK_ACCOUNTS } from '../data/demoData';
 
@@ -106,6 +107,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string>('');
   const [actionError, setActionError] = useState<string>('');
+
+  // Modals & confirmation dialogs (safe for sandboxed iframes)
+  const [showSeedConfirmModal, setShowSeedConfirmModal] = useState(false);
+  const [memberToRemove, setMemberToRemove] = useState<EkubMember | null>(null);
 
   // Disburse modal / inline input
   const [disburseTarget, setDisburseTarget] = useState<Payout | null>(null);
@@ -269,16 +274,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  // Handle Remove Member
-  const handleRemoveMember = async (userId: string) => {
-    if (!selectedEkubId) return;
-    if (!confirm('Are you sure you want to remove this member from the Ekub?')) return;
+  // Handle Remove Member Confirmation & Execution
+  const handleConfirmRemoveMember = async () => {
+    if (!selectedEkubId || !memberToRemove) return;
+    const userId = memberToRemove.userId;
     setProcessingId(userId);
     setActionError('');
     setActionSuccess('');
     try {
       await removeEkubMember(selectedEkubId, userId);
-      setActionSuccess('Member removed from Ekub.');
+      setActionSuccess(`Member ${memberToRemove.displayName} removed from Ekub.`);
+      setMemberToRemove(null);
       const m = await getEkubMembers(selectedEkubId);
       setMembers(Array.isArray(m) ? m : []);
       onRefreshData();
@@ -289,7 +295,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  // Handle Invite Member
+  // Handle Seed Sample Data (Super Admin)
+  const [seedingData, setSeedingData] = useState(false);
+
+  const handleExecuteSeedSampleData = async () => {
+    setSeedingData(true);
+    setActionError('');
+    setActionSuccess('');
+    try {
+      const circles = await seedSampleData();
+      setShowSeedConfirmModal(false);
+      setActionSuccess(
+        `Successfully generated ${circles.length} sample circles: ` +
+        circles.map(c => `${c.name} (${c.memberCount} members, Admin: ${c.adminEmail})`).join('; ')
+      );
+      onRefreshData();
+    } catch (err: any) {
+      setActionError(err.message || 'Failed to generate sample data.');
+    } finally {
+      setSeedingData(false);
+    }
+  };
+
   const handleInviteMember = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inviteEmail.trim() || !inviteFullName.trim()) return;
@@ -385,6 +412,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               >
                 <Plus className="w-4 h-4" />
                 <span>{t.startEkub}</span>
+              </button>
+            )}
+
+            {isSuperAdmin && (
+              <button
+                onClick={() => setShowSeedConfirmModal(true)}
+                disabled={seedingData}
+                className="px-4 py-2.5 bg-white/10 hover:bg-white/15 text-white border border-white/20 font-bold text-xs uppercase tracking-widest transition-all flex items-center space-x-1.5 rounded-lg disabled:opacity-50"
+                title="Creates 3 sample circles with real Admin accounts, for testing"
+              >
+                <Sparkles className="w-4 h-4 text-[#C4B5FD]" />
+                <span>{seedingData ? 'Generating...' : 'Generate Sample Data'}</span>
               </button>
             )}
 
@@ -656,7 +695,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <div className="text-right">
                       <p className="text-lg font-bold text-[#7856FF]">{p.amount.toLocaleString()} ETB</p>
                       <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
-                        {p.status.replace('_', ' ')}
+                        {(p.status || '').replace(/_/g, ' ')}
                       </span>
                     </div>
                   </div>
@@ -734,7 +773,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             >
               {ekubs.map((e) => (
                 <option key={e.id} value={e.id}>
-                  {e.name} ({e.status.toUpperCase()})
+                  {e.name} ({(e.status || 'ACTIVE').toUpperCase()})
                 </option>
               ))}
             </select>
@@ -809,7 +848,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 Approve
                               </button>
                               <button
-                                onClick={() => handleRemoveMember(m.userId)}
+                                onClick={() => setMemberToRemove(m)}
                                 disabled={processingId === m.userId}
                                 className="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-bold rounded text-[10px] uppercase tracking-wider transition-colors disabled:opacity-50"
                               >
@@ -818,7 +857,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             </div>
                           ) : canManageCurrentEkub && m.role !== 'admin' ? (
                             <button
-                              onClick={() => handleRemoveMember(m.userId)}
+                              onClick={() => setMemberToRemove(m)}
                               disabled={processingId === m.userId}
                               className="text-red-500 hover:text-red-700 text-[11px] font-bold uppercase tracking-wider hover:underline"
                             >
@@ -1136,16 +1175,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <div key={log.id} className="p-4 hover:bg-gray-50 transition-colors text-xs space-y-1">
                     <div className="flex justify-between items-center">
                       <span className="font-bold text-gray-900 uppercase tracking-wider text-[11px]">
-                        {log.action.replace(/_/g, ' ')}
+                        {((log.action || (log as any).actionType || 'LOG_ENTRY') as string).replace(/_/g, ' ')}
                       </span>
                       <span className="text-[10px] text-gray-400 font-mono">
-                        {new Date(log.timestamp).toLocaleString()}
+                        {log.timestamp ? new Date(log.timestamp).toLocaleString() : 'Recent'}
                       </span>
                     </div>
-                    <p className="text-gray-600">{log.details}</p>
+                    <p className="text-gray-600">{log.details || log.reason || 'Activity recorded.'}</p>
                     <div className="flex gap-4 text-[10px] text-gray-400 pt-1">
-                      <span>Actor: <strong className="text-gray-600">{log.performedByName || log.performedBy}</strong></span>
-                      {log.targetEkubId && <span>Ekub: <strong className="text-gray-600">{log.targetEkubId}</strong></span>}
+                      <span>Actor: <strong className="text-gray-600">{log.actorName || (log as any).performedByName || log.actorId || (log as any).performedBy || 'System'}</strong></span>
+                      {(log.entityId || (log as any).ekubId || (log as any).targetEkubId) && (
+                        <span>Target: <strong className="text-gray-600">{log.entityId || (log as any).ekubId || (log as any).targetEkubId}</strong></span>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1201,6 +1242,134 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* SAMPLE DATA GENERATION MODAL (SUPER ADMIN ONLY) */}
+      {showSeedConfirmModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white max-w-lg w-full p-6 sm:p-7 rounded-2xl border border-[#E6E1F5] shadow-2xl space-y-5 text-gray-900 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-start">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-xl bg-[#7856FF]/10 text-[#7856FF] flex items-center justify-center">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-[#1C1132]">Generate Sample Circles &amp; Admins</h3>
+                  <p className="text-xs text-gray-500">Platform Demonstration &amp; Testing Suite</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => !seedingData && setShowSeedConfirmModal(false)} 
+                disabled={seedingData}
+                className="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-30"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-600 leading-relaxed">
+              This will provision <strong>3 realistic Ethiopian Ekub circles</strong> with complete member rosters and dedicated Circle Administrator accounts:
+            </p>
+
+            <div className="space-y-2.5">
+              <div className="p-3 bg-[#F8F7FC] border border-[#E6E1F5] rounded-xl text-xs space-y-1">
+                <div className="flex justify-between font-bold text-gray-900">
+                  <span>1. Bole Daily Savers</span>
+                  <span className="text-[#7856FF] uppercase text-[10px]">Daily &middot; 10 Members</span>
+                </div>
+                <p className="text-gray-500 text-[11px]">500 ETB / day &middot; 5,000 ETB pool &middot; Admin: Abebe Bekele (<code>admin.bole.daily@yegnaekub-demo.et</code>)</p>
+              </div>
+
+              <div className="p-3 bg-[#F8F7FC] border border-[#E6E1F5] rounded-xl text-xs space-y-1">
+                <div className="flex justify-between font-bold text-gray-900">
+                  <span>2. Merkato Weekly Circle</span>
+                  <span className="text-[#7856FF] uppercase text-[10px]">Weekly &middot; 20 Members</span>
+                </div>
+                <p className="text-gray-500 text-[11px]">2,000 ETB / week &middot; 40,000 ETB pool &middot; Admin: Selamawit Tesfaye (<code>admin.merkato.weekly@yegnaekub-demo.et</code>)</p>
+              </div>
+
+              <div className="p-3 bg-[#F8F7FC] border border-[#E6E1F5] rounded-xl text-xs space-y-1">
+                <div className="flex justify-between font-bold text-gray-900">
+                  <span>3. Piazza Monthly Cooperative</span>
+                  <span className="text-[#7856FF] uppercase text-[10px]">Monthly &middot; 30 Members</span>
+                </div>
+                <p className="text-gray-500 text-[11px]">5,000 ETB / month &middot; 150,000 ETB pool &middot; Admin: Dawit Alemu (<code>admin.piazza.monthly@yegnaekub-demo.et</code>)</p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-purple-50 border border-purple-100 rounded-xl text-[11px] text-purple-900 flex items-start space-x-2">
+              <ShieldCheck className="w-4 h-4 text-[#7856FF] shrink-0 mt-0.5" />
+              <span>The Super Admin is maintained as a platform-level observer and is never enrolled as a member.</span>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                disabled={seedingData}
+                onClick={() => setShowSeedConfirmModal(false)}
+                className="flex-1 py-2.5 text-xs font-bold uppercase tracking-wider text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={seedingData}
+                onClick={handleExecuteSeedSampleData}
+                className="flex-1 py-2.5 text-xs font-bold uppercase tracking-wider text-white bg-[#7856FF] hover:bg-[#6340FF] rounded-xl shadow-md shadow-[#7856FF]/25 transition-all flex items-center justify-center space-x-2 disabled:opacity-50"
+              >
+                {seedingData ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent animate-spin rounded-full" />
+                    <span>Provisioning Circles...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4" />
+                    <span>Confirm &amp; Generate</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* REMOVE / REJECT MEMBER CONFIRMATION MODAL */}
+      {memberToRemove && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white max-w-sm w-full p-6 rounded-2xl border border-[#E6E1F5] shadow-2xl space-y-4 text-gray-900 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-start space-x-3">
+              <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center shrink-0">
+                <AlertCircle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-[#1C1132]">Remove Circle Member</h3>
+                <p className="text-xs text-gray-500 mt-1">
+                  Are you sure you want to remove <strong>{memberToRemove.displayName}</strong> ({memberToRemove.email || memberToRemove.userId}) from this Ekub?
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                disabled={processingId === memberToRemove.userId}
+                onClick={() => setMemberToRemove(null)}
+                className="flex-1 py-2 text-xs font-bold uppercase tracking-wider text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={processingId === memberToRemove.userId}
+                onClick={handleConfirmRemoveMember}
+                className="flex-1 py-2 text-xs font-bold uppercase tracking-wider text-white bg-red-600 hover:bg-red-700 rounded-lg shadow-sm transition-colors disabled:opacity-50"
+              >
+                {processingId === memberToRemove.userId ? 'Removing...' : 'Confirm Remove'}
+              </button>
+            </div>
           </div>
         </div>
       )}

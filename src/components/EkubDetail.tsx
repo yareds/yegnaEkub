@@ -145,7 +145,7 @@ export const EkubDetail: React.FC<EkubDetailProps> = ({
             <p className="text-base font-bold text-gray-900 mt-0.5">
               {ekub.contributionAmount.toLocaleString()} ETB
             </p>
-            <p className="text-[10px] text-gray-500 mt-0.5 capitalize">Per {ekub.frequency.replace('ly', '')}</p>
+            <p className="text-[10px] text-gray-500 mt-0.5 capitalize">Per {(ekub.frequency || 'cycle').replace('ly', '')}</p>
           </div>
 
           <div className="p-3 bg-[#F8F7FC] border border-[#E6E1F5] rounded-xl">

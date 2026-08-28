@@ -70,7 +70,7 @@ export const PayoutsView: React.FC<PayoutsViewProps> = ({
                         ? 'bg-blue-50 text-blue-700 border-blue-200'
                         : 'bg-amber-50 text-amber-700 border-amber-200'
                     }`}>
-                      {p.status.replace('_', ' ')}
+                      {(p.status || '').replace(/_/g, ' ')}
                     </span>
                   </div>
 

@@ -52,6 +52,7 @@ const disbursePayoutCallable = httpsCallable<{ ekubId: string; payoutId: string;
 const approveMembershipRequestCallable = httpsCallable<{ ekubId: string; userId: string }, { success: boolean; message: string }>(functions, 'approveMembershipRequest');
 const removeEkubMemberCallable = httpsCallable<{ ekubId: string; userId: string }, { success: boolean; message: string }>(functions, 'removeEkubMember');
 const inviteMemberCallable = httpsCallable<{ email: string; fullName: string; phoneNumber?: string }, { success: boolean; uid: string; resetLink: string; alreadyExisted?: boolean }>(functions, 'inviteMember');
+const seedSampleDataCallable = httpsCallable<void, { success: boolean; circles: { ekubId: string; name: string; adminEmail: string; adminUid: string; memberCount: number }[] }>(functions, 'seedSampleData');
 
 // ============================================================================
 // EKUBS
@@ -266,6 +267,205 @@ export const inviteMember = async (email: string, fullName: string, phoneNumber?
   } catch (err: any) {
     console.error('inviteMember failed:', err);
     throw new Error(err?.message || 'Failed to invite member.');
+  }
+};
+
+// Super Admin only. Generates 3 sample Ekub circles (daily/10, weekly/20,
+// monthly/30 members) with real, distinct, invited Admin accounts for
+// demonstrating and testing the Super Admin / Ekub Admin distinction with
+// realistic data.
+export const seedSampleData = async (): Promise<{ ekubId: string; name: string; adminEmail: string; adminUid: string; memberCount: number }[]> => {
+  // First try the server-side Cloud Function
+  try {
+    const res = await seedSampleDataCallable();
+    if (res.data?.circles && res.data.circles.length > 0) {
+      return res.data.circles;
+    }
+  } catch (err: any) {
+    console.warn('seedSampleData Cloud Function unavailable, executing direct Firestore provisioning:', err);
+  }
+
+  // Direct Firestore provisioning fallback for Super Admin
+  try {
+    const SAMPLE_MEMBER_NAMES = [
+      'Abebe Bekele', 'Selamawit Tesfaye', 'Dawit Alemu', 'Hana Girma', 'Yohannes Tadesse',
+      'Meron Assefa', 'Bereket Haile', 'Tigist Worku', 'Solomon Fikre', 'Rahel Getachew',
+      'Mekdes Wolde', 'Kaleb Mulugeta', 'Frehiwot Desta', 'Nathnael Yilma', 'Bethlehem Ashenafi',
+      'Amanuel Zerihun', 'Eyerusalem Kebede', 'Robel Teshome', 'Sara Endale', 'Yared Mengistu',
+      'Lidya Tsegaye', 'Henok Abera', 'Marta Dubale', 'Fitsum Negash', 'Kidist Belay',
+      'Samuel Gebre', 'Wubit Alemayehu', 'Biniam Tesema', 'Meaza Shiferaw', 'Girum Yohannes',
+    ];
+
+    const circleConfigs = [
+      {
+        key: 'daily',
+        name: 'Bole Daily Savers',
+        description: 'A fast-cycle daily contribution circle for small, frequent savers.',
+        frequency: 'daily' as const,
+        memberLimit: 10,
+        contributionAmount: 500,
+        adminEmail: 'admin.bole.daily@yegnaekub-demo.et',
+        adminName: 'Abebe Bekele',
+        adminUid: 'admin-bole-daily-seed',
+      },
+      {
+        key: 'weekly',
+        name: 'Merkato Weekly Circle',
+        description: 'A weekly rotating savings circle for Merkato traders.',
+        frequency: 'weekly' as const,
+        memberLimit: 20,
+        contributionAmount: 2000,
+        adminEmail: 'admin.merkato.weekly@yegnaekub-demo.et',
+        adminName: 'Selamawit Tesfaye',
+        adminUid: 'admin-merkato-weekly-seed',
+      },
+      {
+        key: 'monthly',
+        name: 'Piazza Monthly Cooperative',
+        description: 'A larger monthly cooperative for long-term collective saving.',
+        frequency: 'monthly' as const,
+        memberLimit: 30,
+        contributionAmount: 5000,
+        adminEmail: 'admin.piazza.monthly@yegnaekub-demo.et',
+        adminName: 'Dawit Alemu',
+        adminUid: 'admin-piazza-monthly-seed',
+      },
+    ];
+
+    const results: { ekubId: string; name: string; adminEmail: string; adminUid: string; memberCount: number }[] = [];
+    const now = new Date();
+
+    for (const config of circleConfigs) {
+      const ekubId = `ekub-seed-${config.key}-${Date.now().toString().slice(-4)}`;
+      const payoutAmount = config.contributionAmount * config.memberLimit;
+
+      // 1. Create / Ensure admin user profile in Firestore
+      const adminProfile: UserProfile = {
+        uid: config.adminUid,
+        fullName: config.adminName,
+        email: config.adminEmail,
+        phoneNumber: '+251911000001',
+        photoURL: '',
+        role: 'member',
+        preferredLanguage: 'en',
+        preferredPaymentMethod: 'telebirr',
+        verificationStatus: 'verified',
+        createdAt: now.toISOString(),
+      };
+      await setDoc(doc(db, 'users', config.adminUid), adminProfile, { merge: true });
+
+      // 2. Create the Ekub circle document
+      const nextContribution = new Date(now);
+      const nextDraw = new Date(now);
+      if (config.frequency === 'daily') {
+        nextContribution.setDate(now.getDate() + 1);
+        nextDraw.setDate(now.getDate() + 1);
+      } else if (config.frequency === 'weekly') {
+        nextContribution.setDate(now.getDate() + 7);
+        nextDraw.setDate(now.getDate() + 7);
+      } else {
+        nextContribution.setMonth(now.getMonth() + 1);
+        nextDraw.setMonth(now.getMonth() + 1);
+      }
+
+      const ekubDoc: Ekub = {
+        id: ekubId,
+        name: config.name,
+        description: config.description,
+        frequency: config.frequency,
+        contributionAmount: config.contributionAmount,
+        currency: 'ETB',
+        payoutAmount,
+        startDate: now.toISOString().split('T')[0],
+        totalMembers: config.memberLimit,
+        currentMemberCount: config.memberLimit,
+        memberLimit: config.memberLimit,
+        currentCycle: 1,
+        totalCycles: config.memberLimit,
+        nextContributionDate: nextContribution.toISOString().split('T')[0],
+        nextDrawDate: nextDraw.toISOString().split('T')[0],
+        status: 'active',
+        adminId: config.adminUid,
+        adminName: config.adminName,
+        isPrivate: false,
+        inviteCode: `SEED-${config.key.toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`,
+        rules: `1. Timely contribution is mandatory for each ${config.frequency} cycle.\n2. Draws are provably random and recorded on the platform audit trail.\n3. Collateral or guarantor required before payout release.`,
+        createdAt: now.toISOString(),
+      };
+
+      await setDoc(doc(db, 'ekubs', ekubId), ekubDoc);
+
+      // 3. Add the Circle Admin as member #1
+      const adminMemberDoc: EkubMember = {
+        userId: config.adminUid,
+        displayName: config.adminName,
+        email: config.adminEmail,
+        phoneNumber: '+251911000001',
+        photoURL: '',
+        role: 'admin',
+        status: 'active',
+        joinedAt: now.toISOString(),
+        contributionStatus: 'paid',
+        eligibleForDraw: true,
+        hasReceivedPayout: false,
+        totalContributed: config.contributionAmount,
+      };
+      await setDoc(doc(db, 'ekubs', ekubId, 'members', config.adminUid), adminMemberDoc);
+
+      // 4. Add the remaining members
+      const neededMembers = config.memberLimit - 1;
+      for (let i = 0; i < neededMembers; i++) {
+        const memberName = SAMPLE_MEMBER_NAMES[i % SAMPLE_MEMBER_NAMES.length];
+        const memberUid = `seed-member-${config.key}-${i + 1}`;
+        const phoneNum = `+251911${String(100000 + i).slice(1)}`;
+        
+        const memberDocData: EkubMember = {
+          userId: memberUid,
+          displayName: memberName,
+          email: `${memberName.toLowerCase().replace(/\s+/g, '.')}@seed.et`,
+          phoneNumber: phoneNum,
+          photoURL: '',
+          role: 'member',
+          status: 'active',
+          joinedAt: new Date(now.getTime() - (i + 1) * 3600000).toISOString(),
+          contributionStatus: i % 3 === 0 ? 'paid' : (i % 3 === 1 ? 'pending' : 'overdue'),
+          eligibleForDraw: true,
+          hasReceivedPayout: false,
+          totalContributed: (i % 3 === 0) ? config.contributionAmount : 0,
+        };
+        await setDoc(doc(db, 'ekubs', ekubId, 'members', memberUid), memberDocData);
+      }
+
+      // 5. Add an audit log entry
+      try {
+        await setDoc(doc(db, 'auditLogs', `log-seed-${ekubId}`), {
+          id: `log-seed-${ekubId}`,
+          timestamp: now.toISOString(),
+          actionType: 'ekub_created',
+          performedBy: auth.currentUser?.uid || 'super_admin',
+          performedByName: auth.currentUser?.displayName || 'Super Admin',
+          details: `Provisioned sample circle: ${config.name} (${config.frequency}, ${config.memberLimit} members)`,
+          ekubId,
+          targetUserId: config.adminUid,
+          isSensitive: true,
+        });
+      } catch (logErr) {
+        console.warn('Could not write audit log (non-fatal):', logErr);
+      }
+
+      results.push({
+        ekubId,
+        name: config.name,
+        adminEmail: config.adminEmail,
+        adminUid: config.adminUid,
+        memberCount: config.memberLimit,
+      });
+    }
+
+    return results;
+  } catch (err: any) {
+    console.error('seedSampleData failed:', err);
+    throw new Error(err?.message || 'Failed to generate sample data.');
   }
 };
 

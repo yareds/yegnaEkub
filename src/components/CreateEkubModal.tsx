@@ -333,8 +333,8 @@ export const CreateEkubModal: React.FC<CreateEkubModalProps> = ({
                         : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'
                     }`}
                   >
-                    <p className="text-xs font-bold">{bank.name.split('(')[0]}</p>
-                    <p className="text-[10px] text-gray-400">{bank.code.toUpperCase()}</p>
+                    <p className="text-xs font-bold">{(bank.name || '').split('(')[0]}</p>
+                    <p className="text-[10px] text-gray-400">{(bank.code || '').toUpperCase()}</p>
                   </button>
                 );
               })}

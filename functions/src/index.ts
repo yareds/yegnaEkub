@@ -1042,3 +1042,220 @@ export const inviteMember = functions.https.onCall(async (data, context) => {
 
   return { success: true, uid: userRecord.uid, resetLink };
 });
+
+// ============================================================================
+// 10. SEED SAMPLE DATA (Super Admin only, for demonstration/testing)
+//
+// Creates 3 real Ekub circles with 3 real, distinct, invited Admin accounts
+// (each Admin is a genuine Firebase Auth user who can actually sign in and
+// administer their own circle -- consistent with the rest of the app's
+// model, unlike a purely client-side demo array). The Super Admin is never
+// added as a member of any of these circles, matching the platform's core
+// rule.
+//
+// To keep this practical, only the 3 Admin accounts are real, login-capable
+// Firebase Auth users (created the same way inviteMember does it, so they
+// work identically). The remaining member slots in each circle are filled
+// with realistic-looking, clearly-marked (isSeedData: true) member records
+// so the roster/member-count UI has real data to display -- these are NOT
+// login-capable accounts, since creating dozens of real throwaway email
+// accounts isn't practical for a demo. This mirrors how seed data works in
+// most real applications: key accounts are real, bulk filler data is
+// synthetic.
+// ============================================================================
+export const seedSampleData = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated.');
+  }
+  const isSuper = await checkIsSuperAdmin(context.auth.uid, context.auth);
+  if (!isSuper) {
+    throw new functions.https.HttpsError('permission-denied', 'Only the Super Admin can generate sample data.');
+  }
+
+  const SAMPLE_MEMBER_NAMES = [
+    'Abebe Bekele', 'Selamawit Tesfaye', 'Dawit Alemu', 'Hana Girma', 'Yohannes Tadesse',
+    'Meron Assefa', 'Bereket Haile', 'Tigist Worku', 'Solomon Fikre', 'Rahel Getachew',
+    'Mekdes Wolde', 'Kaleb Mulugeta', 'Frehiwot Desta', 'Nathnael Yilma', 'Bethlehem Ashenafi',
+    'Amanuel Zerihun', 'Eyerusalem Kebede', 'Robel Teshome', 'Sara Endale', 'Yared Mengistu',
+    'Lidya Tsegaye', 'Henok Abera', 'Marta Dubale', 'Fitsum Negash', 'Kidist Belay',
+    'Samuel Gebre', 'Wubit Alemayehu', 'Biniam Tesema', 'Meaza Shiferaw', 'Girum Yohannes',
+  ];
+
+  const circleConfigs = [
+    {
+      key: 'daily',
+      name: 'Bole Daily Savers',
+      description: 'A fast-cycle daily contribution circle for small, frequent savers.',
+      frequency: 'daily',
+      memberLimit: 10,
+      contributionAmount: 500,
+      adminEmail: 'admin.bole.daily@yegnaekub-demo.et',
+      adminName: 'Abebe Bekele',
+    },
+    {
+      key: 'weekly',
+      name: 'Merkato Weekly Circle',
+      description: 'A weekly rotating savings circle for Merkato traders.',
+      frequency: 'weekly',
+      memberLimit: 20,
+      contributionAmount: 2000,
+      adminEmail: 'admin.merkato.weekly@yegnaekub-demo.et',
+      adminName: 'Selamawit Tesfaye',
+    },
+    {
+      key: 'monthly',
+      name: 'Piazza Monthly Cooperative',
+      description: 'A larger monthly cooperative for long-term collective saving.',
+      frequency: 'monthly',
+      memberLimit: 30,
+      contributionAmount: 5000,
+      adminEmail: 'admin.piazza.monthly@yegnaekub-demo.et',
+      adminName: 'Dawit Alemu',
+    },
+  ];
+
+  const createdCircles: { ekubId: string; name: string; adminEmail: string; adminUid: string; memberCount: number }[] = [];
+
+  for (const config of circleConfigs) {
+    // Reuse the account if it already exists (running this twice shouldn't
+    // create duplicate Auth users), otherwise create it fresh -- same
+    // pattern as inviteMember.
+    let adminUid: string;
+    try {
+      const existing = await admin.auth().getUserByEmail(config.adminEmail);
+      adminUid = existing.uid;
+      const existingProfile = await db.collection('users').doc(adminUid).get();
+      if (!existingProfile.exists) {
+        await db.collection('users').doc(adminUid).set({
+          uid: adminUid,
+          fullName: config.adminName,
+          email: config.adminEmail,
+          phoneNumber: '',
+          photoURL: '',
+          role: 'member',
+          preferredLanguage: 'en',
+          preferredPaymentMethod: 'telebirr',
+          verificationStatus: 'verified',
+          createdAt: new Date().toISOString(),
+        });
+      }
+    } catch (err: any) {
+      if (err.code !== 'auth/user-not-found') {
+        throw new functions.https.HttpsError('internal', `Failed to look up admin account for ${config.name}.`);
+      }
+      const created = await admin.auth().createUser({
+        email: config.adminEmail,
+        displayName: config.adminName,
+        emailVerified: false,
+      });
+      adminUid = created.uid;
+      await db.collection('users').doc(adminUid).set({
+        uid: adminUid,
+        fullName: config.adminName,
+        email: config.adminEmail,
+        phoneNumber: '',
+        photoURL: '',
+        role: 'member',
+        preferredLanguage: 'en',
+        preferredPaymentMethod: 'telebirr',
+        verificationStatus: 'verified',
+        createdAt: new Date().toISOString(),
+      });
+    }
+
+    const ekubId = `ekub-seed-${config.key}-${Date.now()}`;
+    const payoutAmount = config.contributionAmount * config.memberLimit;
+
+    const newEkub = {
+      id: ekubId,
+      name: config.name,
+      description: config.description,
+      category: 'General',
+      frequency: config.frequency,
+      contributionAmount: config.contributionAmount,
+      memberLimit: config.memberLimit,
+      payoutAmount,
+      currentMemberCount: config.memberLimit,
+      currentCycle: 1,
+      totalCycles: config.memberLimit,
+      startDate: new Date().toISOString().split('T')[0],
+      nextContributionDate: new Date().toISOString().split('T')[0],
+      nextDrawDate: new Date().toISOString(),
+      status: 'active',
+      currency: 'ETB',
+      isPrivate: false,
+      adminId: adminUid,
+      adminName: config.adminName,
+      adminHistory: [
+        {
+          previousAdminId: '',
+          newAdminId: adminUid,
+          newAdminName: config.adminName,
+          assignedAt: new Date().toISOString(),
+          assignedBy: context.auth.uid,
+        },
+      ],
+      createdBy: context.auth.uid,
+      creatorId: context.auth.uid,
+      acceptedPaymentMethods: ['telebirr', 'cbe'],
+      createdAt: new Date().toISOString(),
+    };
+
+    const batch = db.batch();
+    batch.set(db.collection('ekubs').doc(ekubId), newEkub);
+
+    // The Admin's own member record within their circle.
+    batch.set(db.collection('ekubs').doc(ekubId).collection('members').doc(adminUid), {
+      userId: adminUid,
+      displayName: config.adminName,
+      role: 'admin',
+      status: 'active',
+      joinedAt: new Date().toISOString(),
+      contributionStatus: 'pending',
+      hasReceivedPayout: false,
+      eligibleForDraw: true,
+    });
+
+    // Fill the remaining slots with clearly-marked synthetic member records
+    // (not real, login-capable accounts) so the roster and member-count UI
+    // has realistic data to display.
+    for (let i = 0; i < config.memberLimit - 1; i++) {
+      const fakeUid = `seed-${config.key}-member-${i}-${Date.now()}`;
+      const fakeName = SAMPLE_MEMBER_NAMES[i % SAMPLE_MEMBER_NAMES.length];
+      batch.set(db.collection('ekubs').doc(ekubId).collection('members').doc(fakeUid), {
+        userId: fakeUid,
+        displayName: fakeName,
+        role: 'member',
+        status: 'active',
+        joinedAt: new Date().toISOString(),
+        contributionStatus: 'pending',
+        hasReceivedPayout: false,
+        eligibleForDraw: true,
+        isSeedData: true,
+      });
+    }
+
+    await batch.commit();
+
+    createdCircles.push({
+      ekubId,
+      name: config.name,
+      adminEmail: config.adminEmail,
+      adminUid,
+      memberCount: config.memberLimit,
+    });
+  }
+
+  await writeAuditLog({
+    actorId: context.auth.uid,
+    actorName: 'Super Admin',
+    actorRole: 'super_admin',
+    action: 'SAMPLE_DATA_SEEDED',
+    entityType: 'ekub',
+    entityId: 'multiple',
+    reason: `Generated ${createdCircles.length} sample Ekub circles for demonstration/testing`,
+    newState: { circles: createdCircles.map(c => ({ name: c.name, ekubId: c.ekubId })) },
+  });
+
+  return { success: true, circles: createdCircles };
+});

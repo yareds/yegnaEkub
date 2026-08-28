@@ -142,7 +142,7 @@ export const ContributionsView: React.FC<ContributionsViewProps> = ({
                 filtered.map((c) => (
                   <tr key={c.id} className="hover:bg-gray-50/60">
                     <td className="py-3.5 px-4 text-gray-500 font-mono text-[11px]">
-                      {c.submittedAt.split('T')[0]}
+                      {c.submittedAt ? c.submittedAt.split('T')[0] : 'N/A'}
                     </td>
                     <td className="py-3.5 px-4 font-bold text-gray-900">
                       {c.userName}
