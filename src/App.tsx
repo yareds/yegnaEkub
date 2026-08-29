@@ -28,7 +28,8 @@ import {
   getPayouts,
   getNotifications,
   getSupportTickets,
-  markNotificationsAsRead
+  markNotificationsAsRead,
+  getMyMemberEkubIds
 } from './firebase/ekubService';
 import { SignInModal } from './components/SignInModal';
 import { YegnaEkubLogo } from './components/YegnaEkubLogo';
@@ -45,6 +46,7 @@ function MainAppContent() {
 
   // Domain Datasets
   const [ekubs, setEkubs] = useState<Ekub[]>([]);
+  const [myMemberEkubIds, setMyMemberEkubIds] = useState<string[]>([]);
   const [contributions, setContributions] = useState<Contribution[]>([]);
   const [draws, setDraws] = useState<Draw[]>([]);
   const [payouts, setPayouts] = useState<Payout[]>([]);
@@ -54,6 +56,17 @@ function MainAppContent() {
 
   // Role verification: is the user a Super Admin or the designated admin of at least one Ekub?
   const isEkubAdminOfAny = Boolean(userProfile?.uid && ekubs.some(e => e.adminId === userProfile.uid));
+
+  // Circles this specific user actually belongs to -- as the assigned
+  // admin, or as an active member (via myMemberEkubIds, computed in
+  // refreshAllData). Super Admin sees every circle regardless, matching
+  // their platform-wide oversight role. This is what member-facing views
+  // (Dashboard, Draws, Contributions) should render, NOT the raw `ekubs`
+  // list -- otherwise a member or Ekub Admin sees every circle on the
+  // platform instead of just their own.
+  const myEkubs = isSuperAdmin
+    ? ekubs
+    : ekubs.filter(e => e.adminId === userProfile?.uid || myMemberEkubIds.includes(e.id));
   const hasAdminAccess = isSuperAdmin || isEkubAdminOfAny;
 
   // Modals
@@ -109,6 +122,17 @@ function MainAppContent() {
       const adminEkubIds = Array.isArray(eList)
         ? eList.filter(e => e.adminId === userProfile?.uid).map(e => e.id)
         : [];
+
+      // Which circles is this user an ACTIVE MEMBER of (as opposed to
+      // administering)? Needed so member-facing views (Dashboard, Draws,
+      // Contributions, Payouts) only ever show circles this specific user
+      // actually belongs to, not every circle on the platform. Super Admin
+      // skips this entirely -- they see everything regardless.
+      const isSuperAdminUserForScope = userProfile?.role === 'super_admin' || (userProfile?.role as string) === 'admin';
+      const memberEkubIds = (!isSuperAdminUserForScope && Array.isArray(eList) && userProfile?.uid)
+        ? await getMyMemberEkubIds(eList.map(e => e.id), userProfile.uid)
+        : [];
+      setMyMemberEkubIds(memberEkubIds);
 
       const [dList, nList, tList] = await Promise.all([
         getDraws(),
@@ -283,13 +307,13 @@ function MainAppContent() {
                 />
               ) : (
                 <Dashboard
-                  ekubs={ekubs}
+                  ekubs={myEkubs}
                   contributions={contributions}
                   draws={draws}
                   payouts={payouts}
                   onSelectEkub={handleSelectEkub}
-                  onOpenContribute={(e) => setContributeEkub(e || ekubs[0])}
-                  onOpenLiveDraw={(e) => setLiveDrawEkub(e || ekubs[0])}
+                  onOpenContribute={(e) => setContributeEkub(e || myEkubs[0])}
+                  onOpenLiveDraw={(e) => setLiveDrawEkub(e || myEkubs[0])}
                   onOpenVerifyDraw={(d) => setVerifyDrawTarget(d || draws[0])}
                   onOpenPayout={(p) => setPayoutClaimTarget(p || payouts[0])}
                   onOpenCreateEkub={() => setShowCreateEkub(true)}
@@ -311,16 +335,16 @@ function MainAppContent() {
             {activeTab === 'contributions' && (
               <ContributionsView
                 contributions={contributions}
-                ekubs={ekubs}
-                onOpenContribute={(e) => setContributeEkub(e || ekubs[0])}
+                ekubs={myEkubs}
+                onOpenContribute={(e) => setContributeEkub(e || myEkubs[0])}
               />
             )}
 
             {activeTab === 'draws' && (
               <DrawsView
                 draws={draws}
-                ekubs={ekubs}
-                onOpenLiveDraw={(e) => setLiveDrawEkub(e || ekubs[0])}
+                ekubs={myEkubs}
+                onOpenLiveDraw={(e) => setLiveDrawEkub(e || myEkubs[0])}
                 onOpenVerifyDraw={(d) => setVerifyDrawTarget(d)}
               />
             )}

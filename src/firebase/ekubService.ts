@@ -472,6 +472,31 @@ export const seedSampleData = async (): Promise<{ ekubId: string; name: string; 
 // ============================================================================
 // MEMBERS (SUBCOLLECTION: ekubs/{ekubId}/members/{userId})
 // ============================================================================
+// Given a list of Ekub IDs, returns the subset this specific user is an
+// ACTIVE member of (checked one doc at a time -- simple, safe, and doesn't
+// depend on collection-group query rule semantics, which are easy to get
+// subtly wrong). Used to scope "my circles" for the member-facing views
+// (Dashboard, Draws, Contributions, Payouts) so a member or Ekub Admin only
+// ever sees circles they actually belong to, not every circle on the
+// platform.
+export const getMyMemberEkubIds = async (ekubIds: string[], uid: string): Promise<string[]> => {
+  if (!uid || ekubIds.length === 0) return [];
+  const results = await Promise.all(
+    ekubIds.map(async (ekubId) => {
+      try {
+        const snap = await getDoc(doc(db, 'ekubs', ekubId, 'members', uid));
+        if (snap.exists() && (snap.data() as EkubMember).status === 'active') {
+          return ekubId;
+        }
+        return null;
+      } catch {
+        return null;
+      }
+    })
+  );
+  return results.filter((id): id is string => id !== null);
+};
+
 export const getEkubMembers = async (ekubId: string): Promise<EkubMember[]> => {
   try {
     const membersSnap = await getDocs(collection(db, 'ekubs', ekubId, 'members'));

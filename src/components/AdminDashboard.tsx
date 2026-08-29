@@ -79,11 +79,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const { userProfile, isAdmin, isSuperAdmin } = useAuth();
   const { t, language } = useTranslation();
 
+  // Ekub Admins must only ever see/select circles they actually administer
+  // -- Super Admin sees everything, matching the platform-wide oversight
+  // role. This does NOT affect the "Reassign Ekub Admin" tab's own circle
+  // selector further below, which is correctly Super-Admin-only already
+  // and needs the full list to reassign any circle.
+  const accessibleEkubs = isSuperAdmin ? ekubs : ekubs.filter(e => e.adminId === userProfile?.uid);
+
   // Active Sub-Tab
   const [activeTab, setActiveTab] = useState<'pending-payments' | 'payout-approvals' | 'members' | 'reassign' | 'invite' | 'circles' | 'audit'>('pending-payments');
 
   // Selected Circle for Member Roster / Operations
-  const [selectedEkubId, setSelectedEkubId] = useState<string>(ekubs[0]?.id || '');
+  const [selectedEkubId, setSelectedEkubId] = useState<string>(accessibleEkubs[0]?.id || '');
   const [members, setMembers] = useState<EkubMember[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
 
@@ -120,7 +127,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [loadingAudit, setLoadingAudit] = useState(false);
 
-  const selectedEkub = ekubs.find(e => e.id === selectedEkubId) || ekubs[0];
+  const selectedEkub = accessibleEkubs.find(e => e.id === selectedEkubId) || accessibleEkubs[0];
 
   // Ekub Admin check: Is the current user the designated admin of the selected Ekub?
   const isAssignedEkubAdmin = selectedEkub?.adminId === userProfile?.uid;
@@ -765,13 +772,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </p>
             </div>
 
-            {/* Ekub Selector */}
+            {/* Ekub Selector -- scoped to circles this viewer actually
+                administers; Super Admin sees all of them. */}
             <select
               value={selectedEkubId}
               onChange={(e) => setSelectedEkubId(e.target.value)}
               className="px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs font-bold text-gray-800 focus:outline-none focus:border-[#7856FF]"
             >
-              {ekubs.map((e) => (
+              {accessibleEkubs.map((e) => (
                 <option key={e.id} value={e.id}>
                   {e.name} ({(e.status || 'ACTIVE').toUpperCase()})
                 </option>
@@ -1082,11 +1090,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {activeTab === 'circles' && (
         <div className="space-y-4">
           <h2 className="text-sm font-bold uppercase tracking-wider text-gray-800">
-            Ekub Circles Operational Status ({ekubs.length})
+            Ekub Circles Operational Status ({accessibleEkubs.length})
           </h2>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {ekubs.map((e) => (
+            {accessibleEkubs.map((e) => (
               <div key={e.id} className="bg-white p-5 border border-[#E6E1F5] rounded-xl shadow-sm flex flex-col justify-between space-y-4">
                 <div>
                   <div className="flex justify-between items-start">
