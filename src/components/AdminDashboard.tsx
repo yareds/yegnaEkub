@@ -86,8 +86,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // and needs the full list to reassign any circle.
   const accessibleEkubs = isSuperAdmin ? ekubs : ekubs.filter(e => e.adminId === userProfile?.uid);
 
-  // Active Sub-Tab
-  const [activeTab, setActiveTab] = useState<'pending-payments' | 'payout-approvals' | 'members' | 'reassign' | 'invite' | 'circles' | 'audit'>('pending-payments');
+  // Active Sub-Tab: Super Admin defaults to 'circles', Ekub Admin defaults to 'pending-payments'
+  const [activeTab, setActiveTab] = useState<'pending-payments' | 'payout-approvals' | 'members' | 'reassign' | 'invite' | 'circles' | 'audit'>(
+    isSuperAdmin ? 'circles' : 'pending-payments'
+  );
+
+  // Ensure Super Admin is never on operational payment/payout tabs
+  React.useEffect(() => {
+    if (isSuperAdmin && (activeTab === 'pending-payments' || activeTab === 'payout-approvals')) {
+      setActiveTab('circles');
+    }
+  }, [isSuperAdmin, activeTab]);
 
   // Selected Circle for Member Roster / Operations
   const [selectedEkubId, setSelectedEkubId] = useState<string>(accessibleEkubs[0]?.id || '');
@@ -106,7 +115,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [reassignAdminUid, setReassignAdminUid] = useState('');
   const [reassignAdminName, setReassignAdminName] = useState('');
   const [reassignSubmitting, setReassignSubmitting] = useState(false);
-  const [platformUsers, setPlatformUsers] = useState<UserProfile[]>([]);
+  const [rawPlatformUsers, setRawPlatformUsers] = useState<UserProfile[]>([]);
+  // Derived, not stored in state -- always reflects the CURRENT ekubs on
+  // every render, so it can never go stale the way filtering inside a
+  // one-time fetch effect did.
+  const platformUsers = rawPlatformUsers.filter(
+    u => !ekubs.some(e => e.adminId === u.uid)
+  );
   const [loadingPlatformUsers, setLoadingPlatformUsers] = useState(false);
   const [manualUidEntry, setManualUidEntry] = useState(false);
 
@@ -149,19 +164,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   }, [selectedEkubId]);
 
-  // Load the platform user list when the Reassign tab opens, so the Super
-  // Admin can pick a real person instead of pasting a raw Firebase UID.
+  // Load the RAW platform user list when the Reassign tab opens, so the
+  // Super Admin can pick a real person instead of pasting a raw Firebase
+  // UID. Deliberately does NOT filter here -- filtering against `ekubs`
+  // inside this one-time fetch would capture whatever `ekubs` happened to
+  // be at that exact moment and never update again (this effect only
+  // fires once, gated by rawPlatformUsers.length === 0). The actual
+  // "already administering" filter is computed fresh on every render
+  // below instead, via `platformUsers`, so it always reflects the latest
+  // `ekubs` regardless of when this fetch completed.
   React.useEffect(() => {
-    if (activeTab === 'reassign' && platformUsers.length === 0 && !loadingPlatformUsers) {
+    if (activeTab === 'reassign' && rawPlatformUsers.length === 0 && !loadingPlatformUsers) {
       setLoadingPlatformUsers(true);
       getAllUsers()
-        .then((users) => {
-          // Only show people who aren't already administering another
-          // circle -- someone already assigned as an Ekub Admin elsewhere
-          // shouldn't show up as a reassignment candidate here.
-          const alreadyAdminUids = new Set(ekubs.map(e => e.adminId).filter(Boolean));
-          setPlatformUsers(users.filter(u => !alreadyAdminUids.has(u.uid)));
-        })
+        .then((users) => setRawPlatformUsers(users))
         .finally(() => setLoadingPlatformUsers(false));
     }
   }, [activeTab]);
@@ -478,51 +494,59 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       {/* Secondary Sub-Tabs */}
       <div className="flex flex-wrap border-b border-[#E6E1F5] gap-2 pb-px text-xs font-bold uppercase tracking-wider">
-        <button
-          onClick={() => setActiveTab('pending-payments')}
-          className={`pb-3 px-3 transition-colors flex items-center space-x-1.5 ${
-            activeTab === 'pending-payments'
-              ? 'border-b-2 border-[#7856FF] text-[#7856FF]'
-              : 'text-gray-500 hover:text-gray-900'
-          }`}
-        >
-          <Receipt className="w-4 h-4" />
-          <span>Pending Payments</span>
-          {pendingContributions.length > 0 && (
-            <span className="px-1.5 py-0.2 bg-[#7856FF] text-white text-[10px] rounded-full">
-              {pendingContributions.length}
-            </span>
-          )}
-        </button>
+        {/* Ekub Admin Operational Tabs */}
+        {!isSuperAdmin && (
+          <button
+            onClick={() => setActiveTab('pending-payments')}
+            className={`pb-3 px-3 transition-colors flex items-center space-x-1.5 ${
+              activeTab === 'pending-payments'
+                ? 'border-b-2 border-[#7856FF] text-[#7856FF]'
+                : 'text-gray-500 hover:text-gray-900'
+            }`}
+          >
+            <Receipt className="w-4 h-4" />
+            <span>Pending Payments</span>
+            {pendingContributions.length > 0 && (
+              <span className="px-1.5 py-0.2 bg-[#7856FF] text-white text-[10px] rounded-full">
+                {pendingContributions.length}
+              </span>
+            )}
+          </button>
+        )}
 
-        <button
-          onClick={() => setActiveTab('payout-approvals')}
-          className={`pb-3 px-3 transition-colors flex items-center space-x-1.5 ${
-            activeTab === 'payout-approvals'
-              ? 'border-b-2 border-[#7856FF] text-[#7856FF]'
-              : 'text-gray-500 hover:text-gray-900'
-          }`}
-        >
-          <Banknote className="w-4 h-4" />
-          <span>Payout Approvals</span>
-          {actionablePayouts.length > 0 && (
-            <span className="px-1.5 py-0.2 bg-amber-500 text-white text-[10px] rounded-full">
-              {actionablePayouts.length}
-            </span>
-          )}
-        </button>
+        {!isSuperAdmin && (
+          <button
+            onClick={() => setActiveTab('payout-approvals')}
+            className={`pb-3 px-3 transition-colors flex items-center space-x-1.5 ${
+              activeTab === 'payout-approvals'
+                ? 'border-b-2 border-[#7856FF] text-[#7856FF]'
+                : 'text-gray-500 hover:text-gray-900'
+            }`}
+          >
+            <Banknote className="w-4 h-4" />
+            <span>Payout Approvals</span>
+            {actionablePayouts.length > 0 && (
+              <span className="px-1.5 py-0.2 bg-amber-500 text-white text-[10px] rounded-full">
+                {actionablePayouts.length}
+              </span>
+            )}
+          </button>
+        )}
 
-        <button
-          onClick={() => setActiveTab('members')}
-          className={`pb-3 px-3 transition-colors flex items-center space-x-1.5 ${
-            activeTab === 'members'
-              ? 'border-b-2 border-[#7856FF] text-[#7856FF]'
-              : 'text-gray-500 hover:text-gray-900'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          <span>Circle Roster & Approvals</span>
-        </button>
+        {/* Super Admin Governance Tabs */}
+        {isSuperAdmin && (
+          <button
+            onClick={() => setActiveTab('circles')}
+            className={`pb-3 px-3 transition-colors flex items-center space-x-1.5 ${
+              activeTab === 'circles'
+                ? 'border-b-2 border-[#7856FF] text-[#7856FF]'
+                : 'text-gray-500 hover:text-gray-900'
+            }`}
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>Ekub Operations</span>
+          </button>
+        )}
 
         {isSuperAdmin && (
           <button
@@ -551,16 +575,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </button>
 
         <button
-          onClick={() => setActiveTab('circles')}
+          onClick={() => setActiveTab('members')}
           className={`pb-3 px-3 transition-colors flex items-center space-x-1.5 ${
-            activeTab === 'circles'
+            activeTab === 'members'
               ? 'border-b-2 border-[#7856FF] text-[#7856FF]'
               : 'text-gray-500 hover:text-gray-900'
           }`}
         >
-          <Sparkles className="w-4 h-4" />
-          <span>Ekub Operations</span>
+          <Users className="w-4 h-4" />
+          <span>Circle Roster & Approvals</span>
         </button>
+
+        {!isSuperAdmin && (
+          <button
+            onClick={() => setActiveTab('circles')}
+            className={`pb-3 px-3 transition-colors flex items-center space-x-1.5 ${
+              activeTab === 'circles'
+                ? 'border-b-2 border-[#7856FF] text-[#7856FF]'
+                : 'text-gray-500 hover:text-gray-900'
+            }`}
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>Ekub Operations</span>
+          </button>
+        )}
 
         {isSuperAdmin && (
           <button
@@ -577,8 +615,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         )}
       </div>
 
-      {/* TAB 1: PENDING PAYMENTS AUDIT */}
-      {activeTab === 'pending-payments' && (
+      {/* TAB 1: PENDING PAYMENTS AUDIT (Ekub Admin only) */}
+      {activeTab === 'pending-payments' && !isSuperAdmin && (
         <div className="space-y-4">
           <div className="flex justify-between items-center">
             <h2 className="text-sm font-bold uppercase tracking-wider text-gray-800">
@@ -680,8 +718,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       )}
 
-      {/* TAB 2: PAYOUT APPROVALS & DISBURSEMENT */}
-      {activeTab === 'payout-approvals' && (
+      {/* TAB 2: PAYOUT APPROVALS & DISBURSEMENT (Ekub Admin only) */}
+      {activeTab === 'payout-approvals' && !isSuperAdmin && (
         <div className="space-y-4">
           <h2 className="text-sm font-bold uppercase tracking-wider text-gray-800">
             Guaranteed Draw Winners Awaiting Payout Processing ({actionablePayouts.length})

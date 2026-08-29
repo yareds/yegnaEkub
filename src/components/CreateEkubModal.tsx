@@ -50,21 +50,26 @@ export const CreateEkubModal: React.FC<CreateEkubModalProps> = ({
   const [assignAdminNow, setAssignAdminNow] = useState(false);
   const [selectedAdminUid, setSelectedAdminUid] = useState('');
   const [selectedAdminName, setSelectedAdminName] = useState('');
-  const [platformUsers, setPlatformUsers] = useState<UserProfile[]>([]);
+  const [rawPlatformUsers, setRawPlatformUsers] = useState<UserProfile[]>([]);
   const [loadingPlatformUsers, setLoadingPlatformUsers] = useState(false);
 
+  // Fetches the RAW list once; deliberately does not filter here (see the
+  // derived `platformUsers` below for why).
   React.useEffect(() => {
-    if (assignAdminNow && platformUsers.length === 0 && !loadingPlatformUsers) {
+    if (assignAdminNow && rawPlatformUsers.length === 0 && !loadingPlatformUsers) {
       setLoadingPlatformUsers(true);
       getAllUsers().then((users) => {
-        // Only show people who aren't already administering another
-        // circle -- someone already assigned as an Ekub Admin elsewhere
-        // shouldn't show up as a candidate here.
-        const alreadyAdminUids = new Set(ekubs.map(e => e.adminId).filter(Boolean));
-        setPlatformUsers(users.filter(u => !alreadyAdminUids.has(u.uid)));
+        setRawPlatformUsers(users);
       }).finally(() => setLoadingPlatformUsers(false));
     }
   }, [assignAdminNow]);
+
+  // Derived, not stored in state -- always reflects the CURRENT ekubs on
+  // every render, so it can never go stale the way filtering inside a
+  // one-time fetch effect did.
+  const platformUsers = rawPlatformUsers.filter(
+    u => !ekubs.some(e => e.adminId === u.uid)
+  );
 
   const payoutAmount = targetMembers * contributionAmount;
 

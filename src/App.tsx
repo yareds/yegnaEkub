@@ -88,27 +88,13 @@ function MainAppContent() {
 
   // The Super Admin is never a member of any Ekub -- they have no
   // contributions to make, no draws to watch, nothing to "join." Their
-  // dashboard is the Admin Center, not the member-facing Dashboard. Redirect
-  // them there by default, and also if they ever land back on 'dashboard'
-  // (e.g. clicking the logo) or 'discover'/'contributions'/'draws'/'payouts'
-  // (member-only personal views the Navbar already hides for them, but this
-  // is a second layer of enforcement independent of nav visibility).
+  // workspace is the Admin Center. Redirect them there by default and if
+  // they navigate to member-only views.
   useEffect(() => {
     if (!dataLoading && isSuperAdmin && ['dashboard', 'discover', 'contributions', 'draws', 'payouts'].includes(activeTab)) {
       setActiveTab('admin');
     }
   }, [activeTab, dataLoading, isSuperAdmin]);
-
-  // Redirect guard: the Super Admin is never a member of any Ekub, so the
-  // member-facing personal tabs (discover/contributions/draws/payouts)
-  // don't apply to them -- redirect back to their own dashboard if they
-  // somehow land on one (defense in depth alongside the Navbar/MobileNav
-  // simply not rendering the buttons that would navigate there).
-  useEffect(() => {
-    if (isSuperAdmin && ['discover', 'contributions', 'draws', 'payouts'].includes(activeTab)) {
-      setActiveTab('dashboard');
-    }
-  }, [activeTab, isSuperAdmin]);
 
   const refreshAllData = async () => {
     try {
