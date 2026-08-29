@@ -321,7 +321,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="px-3 py-1 bg-green-50 text-green-700 text-[10px] font-bold border border-green-200 uppercase tracking-wider rounded-md">
-                    ACTIVE CYCLE 0{activeEkub.currentCycle}/10
+                    ACTIVE CYCLE {activeEkub.currentCycle}/{activeEkub.totalCycles || activeEkub.memberLimit || '?'}
                   </span>
                   <button
                     onClick={() => onSelectEkub(activeEkub)}
@@ -333,49 +333,62 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </div>
               </div>
 
-              {/* Geometric Member Turn Bubbles */}
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-8">
-                <div className="flex flex-col items-center gap-2">
-                  <div className="w-12 h-12 rounded-full border-2 border-green-500 flex items-center justify-center bg-green-50 text-green-600 font-bold text-xs">
-                    ✓
-                  </div>
-                  <span className="text-[10px] font-medium text-gray-700">Abebe B.</span>
-                  <span className="text-[8px] text-green-600 uppercase font-bold">Won Cycle 1</span>
-                </div>
+              {/* Member Turn History -- driven by real draw data, not
+                  hardcoded placeholder names. Past cycles show the actual
+                  recorded winner; the current cycle is shown honestly as
+                  "not yet drawn" (draws are random/provably-fair, not a
+                  pre-assigned rotation, so there's no real "your turn" to
+                  claim); remaining cycles are summarized rather than
+                  inventing names for people who haven't been drawn yet. */}
+              {(() => {
+                const ekubDraws = (draws || [])
+                  .filter(d => d.ekubId === activeEkub.id && d.status === 'completed')
+                  .sort((a, b) => a.cycleNumber - b.cycleNumber);
+                const recentPast = ekubDraws.slice(-3);
+                const totalCycles = activeEkub.totalCycles || activeEkub.memberLimit || (ekubDraws.length + 1);
+                const currentCycleNum = activeEkub.currentCycle;
+                const currentAlreadyDrawn = ekubDraws.some(d => d.cycleNumber === currentCycleNum);
+                const remainingAfterCurrent = Math.max(0, totalCycles - currentCycleNum - (currentAlreadyDrawn ? 0 : 1));
 
-                <div className="flex flex-col items-center gap-2">
-                  <div className="w-12 h-12 rounded-full border-2 border-green-500 flex items-center justify-center bg-green-50 text-green-600 font-bold text-xs">
-                    ✓
-                  </div>
-                  <span className="text-[10px] font-medium text-gray-700">Sara T.</span>
-                  <span className="text-[8px] text-green-600 uppercase font-bold">Won Cycle 2</span>
-                </div>
+                return (
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-8">
+                    {recentPast.map((d) => (
+                      <div key={d.id} className="flex flex-col items-center gap-2">
+                        <div className="w-12 h-12 rounded-full border-2 border-green-500 flex items-center justify-center bg-green-50 text-green-600 font-bold text-xs">
+                          ✓
+                        </div>
+                        <span className="text-[10px] font-medium text-gray-700 truncate max-w-[70px]">{d.winnerName}</span>
+                        <span className="text-[8px] text-green-600 uppercase font-bold">Won Cycle {d.cycleNumber}</span>
+                      </div>
+                    ))}
 
-                <div className="flex flex-col items-center gap-2">
-                  <div className="w-12 h-12 rounded-full border-2 border-green-500 flex items-center justify-center bg-green-50 text-green-600 font-bold text-xs">
-                    ✓
-                  </div>
-                  <span className="text-[10px] font-medium text-gray-700">Dawit K.</span>
-                  <span className="text-[8px] text-green-600 uppercase font-bold">Won Cycle 3</span>
-                </div>
+                    {!currentAlreadyDrawn && currentCycleNum <= totalCycles && (
+                      <div className="flex flex-col items-center gap-2">
+                        <div className="w-12 h-12 rounded-full border-3 border-[#7856FF] flex items-center justify-center bg-[#F8F7FC] shadow-md relative">
+                          <span className="text-[#7856FF] font-black text-xs">YOU</span>
+                          <div className="absolute -top-1 -right-1 w-3 h-3 bg-[#7856FF] rounded-full border border-white animate-pulse" />
+                        </div>
+                        <span className="text-[10px] font-bold text-[#7856FF]">Awaiting Draw</span>
+                        <span className="text-[8px] text-[#7856FF] uppercase font-bold">Cycle {currentCycleNum}</span>
+                      </div>
+                    )}
 
-                <div className="flex flex-col items-center gap-2">
-                  <div className="w-12 h-12 rounded-full border-3 border-[#7856FF] flex items-center justify-center bg-[#F8F7FC] shadow-md relative">
-                    <span className="text-[#7856FF] font-black text-xs">YOU</span>
-                    <div className="absolute -top-1 -right-1 w-3 h-3 bg-[#7856FF] rounded-full border border-white animate-pulse" />
-                  </div>
-                  <span className="text-[10px] font-bold text-[#7856FF]">Current Turn</span>
-                  <span className="text-[8px] text-[#7856FF] uppercase font-bold">Friday Draw</span>
-                </div>
+                    {remainingAfterCurrent > 0 && (
+                      <div className="flex flex-col items-center gap-2 opacity-50">
+                        <div className="w-12 h-12 rounded-full border border-gray-300 flex items-center justify-center bg-gray-50 text-gray-400 font-bold text-xs">
+                          +{remainingAfterCurrent}
+                        </div>
+                        <span className="text-[10px] font-medium text-gray-500">Upcoming</span>
+                        <span className="text-[8px] text-gray-400 uppercase">More Cycles</span>
+                      </div>
+                    )}
 
-                <div className="flex flex-col items-center gap-2 opacity-50">
-                  <div className="w-12 h-12 rounded-full border border-gray-300 flex items-center justify-center bg-gray-50 text-gray-400 font-bold text-xs">
-                    05
+                    {recentPast.length === 0 && currentAlreadyDrawn && remainingAfterCurrent === 0 && (
+                      <p className="text-xs text-gray-400 col-span-full py-2">No draw history yet for this circle.</p>
+                    )}
                   </div>
-                  <span className="text-[10px] font-medium text-gray-500">Upcoming</span>
-                  <span className="text-[8px] text-gray-400 uppercase">Cycle 5</span>
-                </div>
-              </div>
+                );
+              })()}
 
               {/* Pot Pool Panel */}
               <div className="bg-[#F8F7FC] p-4 border border-[#E6E1F5] rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">

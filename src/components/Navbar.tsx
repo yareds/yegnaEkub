@@ -112,20 +112,25 @@ export const Navbar: React.FC<NavbarProps> = ({
                 personal views (find a circle, my ledger, watch a draw, my
                 payouts). The Super Admin is never a member of any circle,
                 so none of these apply to them -- their equivalent views
-                live inside the Admin Center's platform-wide tabs instead. */}
+                live inside the Admin Center's platform-wide tabs instead.
+                Discover specifically ("browse public circles to join") is
+                also hidden for an Ekub Admin -- their job is running their
+                own circle, not browsing others. */}
+            {!isAdmin && !isEkubAdminOfAny && (
+              <button
+                onClick={() => setCurrentTab('discover')}
+                className={`transition-all py-1 ${
+                  currentTab === 'discover'
+                    ? 'border-b-2 border-[#7856FF] text-[#C4B5FD] font-bold'
+                    : 'text-white/75 hover:text-white'
+                }`}
+              >
+                {t.discover}
+              </button>
+            )}
+
             {!isAdmin && (
               <>
-                <button
-                  onClick={() => setCurrentTab('discover')}
-                  className={`transition-all py-1 ${
-                    currentTab === 'discover'
-                      ? 'border-b-2 border-[#7856FF] text-[#C4B5FD] font-bold'
-                      : 'text-white/75 hover:text-white'
-                  }`}
-                >
-                  {t.discover}
-                </button>
-
                 <button
                   onClick={() => setCurrentTab('contributions')}
                   className={`transition-all py-1 ${
@@ -302,18 +307,20 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           )}
 
+          {!isAdmin && !isEkubAdminOfAny && (
+            <button
+              onClick={() => { setCurrentTab('discover'); setMobileMenuOpen(false); }}
+              className={`w-full flex items-center space-x-2 px-3 py-2.5 rounded-sm ${
+                currentTab === 'discover' ? 'bg-[#7856FF]/20 text-[#C4B5FD] border-l-4 border-[#7856FF]' : 'text-white/80 hover:bg-white/5'
+              }`}
+            >
+              <Compass className="w-4 h-4" />
+              <span>{t.discover}</span>
+            </button>
+          )}
+
           {!isAdmin && (
             <>
-              <button
-                onClick={() => { setCurrentTab('discover'); setMobileMenuOpen(false); }}
-                className={`w-full flex items-center space-x-2 px-3 py-2.5 rounded-sm ${
-                  currentTab === 'discover' ? 'bg-[#7856FF]/20 text-[#C4B5FD] border-l-4 border-[#7856FF]' : 'text-white/80 hover:bg-white/5'
-                }`}
-              >
-                <Compass className="w-4 h-4" />
-                <span>{t.discover}</span>
-              </button>
-
               <button
                 onClick={() => { setCurrentTab('contributions'); setMobileMenuOpen(false); }}
                 className={`w-full flex items-center space-x-2 px-3 py-2.5 rounded-sm ${

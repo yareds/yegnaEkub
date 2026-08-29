@@ -25,4 +25,5 @@ export const auth = getAuth(app);
 export const functions = getFunctions(app);
 export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();
+export const isFirebaseAvailable = () => Boolean(app && db);
 export default app;
