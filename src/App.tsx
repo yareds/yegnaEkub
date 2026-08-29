@@ -99,16 +99,6 @@ function MainAppContent() {
     }
   }, [activeTab, dataLoading, isSuperAdmin]);
 
-  // Discover ("browse public circles to join") doesn't apply to an Ekub
-  // Admin either -- their job is running their own circle, not browsing
-  // others. Redirect back to their dashboard if they land there (defense
-  // in depth alongside the Navbar/MobileNav hiding the link already).
-  useEffect(() => {
-    if (!dataLoading && !isSuperAdmin && isEkubAdminOfAny && activeTab === 'discover') {
-      setActiveTab('dashboard');
-    }
-  }, [activeTab, dataLoading, isSuperAdmin, isEkubAdminOfAny]);
-
   // Redirect guard: the Super Admin is never a member of any Ekub, so the
   // member-facing personal tabs (discover/contributions/draws/payouts)
   // don't apply to them -- redirect back to their own dashboard if they
@@ -250,7 +240,6 @@ function MainAppContent() {
             onJoinEkub={() => setShowSignIn(true)}
             onExploreEkubs={() => setShowSignIn(true)}
             onOpenLegal={() => setShowLegal(true)}
-            isAdmin={isAdmin}
           />
         </main>
 
@@ -441,6 +430,7 @@ function MainAppContent() {
 
       {showCreateEkub && (
         <CreateEkubModal
+          ekubs={ekubs}
           onClose={() => setShowCreateEkub(false)}
           onSuccess={(newEkub) => {
             refreshAllData();

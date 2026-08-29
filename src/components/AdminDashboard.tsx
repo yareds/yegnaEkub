@@ -138,16 +138,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // action the Cloud Function will reject.
   const canManageCurrentEkub = isAssignedEkubAdmin;
 
-  // Pending Payments / Payout Approvals are hidden entirely for Super
-  // Admin (that's each circle's own Ekub Admin's job) -- redirect off
-  // those tabs if landed on by default, since 'pending-payments' is this
-  // component's initial tab state for everyone.
-  React.useEffect(() => {
-    if (isSuperAdmin && (activeTab === 'pending-payments' || activeTab === 'payout-approvals')) {
-      setActiveTab('members');
-    }
-  }, [isSuperAdmin, activeTab]);
-
   // Load members whenever selected Ekub changes
   React.useEffect(() => {
     if (selectedEkubId) {
@@ -165,7 +155,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     if (activeTab === 'reassign' && platformUsers.length === 0 && !loadingPlatformUsers) {
       setLoadingPlatformUsers(true);
       getAllUsers()
-        .then((users) => setPlatformUsers(users))
+        .then((users) => {
+          // Only show people who aren't already administering another
+          // circle -- someone already assigned as an Ekub Admin elsewhere
+          // shouldn't show up as a reassignment candidate here.
+          const alreadyAdminUids = new Set(ekubs.map(e => e.adminId).filter(Boolean));
+          setPlatformUsers(users.filter(u => !alreadyAdminUids.has(u.uid)));
+        })
         .finally(() => setLoadingPlatformUsers(false));
     }
   }, [activeTab]);
@@ -174,12 +170,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   React.useEffect(() => {
     if (activeTab === 'audit') {
       setLoadingAudit(true);
-      getAuditLogs(50, isSuperAdmin ? undefined : selectedEkubId)
+      getAuditLogs()
         .then((logs) => setAuditLogs(Array.isArray(logs) ? logs : []))
         .catch(() => setAuditLogs([]))
         .finally(() => setLoadingAudit(false));
     }
-  }, [activeTab, isSuperAdmin, selectedEkubId]);
+  }, [activeTab]);
 
   // Handle Verify Contribution
   const handleVerifyContribution = async (contrib: Contribution) => {
@@ -482,48 +478,39 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       {/* Secondary Sub-Tabs */}
       <div className="flex flex-wrap border-b border-[#E6E1F5] gap-2 pb-px text-xs font-bold uppercase tracking-wider">
-        {/* Verifying contributions and approving payouts are exclusively
-            each circle's own Ekub Admin's job -- the Super Admin's role is
-            create/assign/invite plus platform-wide oversight, not
-            day-to-day circle operations. Hidden entirely for Super Admin,
-            not just action-restricted. */}
-        {!isSuperAdmin && (
-          <button
-            onClick={() => setActiveTab('pending-payments')}
-            className={`pb-3 px-3 transition-colors flex items-center space-x-1.5 ${
-              activeTab === 'pending-payments'
-                ? 'border-b-2 border-[#7856FF] text-[#7856FF]'
-                : 'text-gray-500 hover:text-gray-900'
-            }`}
-          >
-            <Receipt className="w-4 h-4" />
-            <span>Pending Payments</span>
-            {pendingContributions.length > 0 && (
-              <span className="px-1.5 py-0.2 bg-[#7856FF] text-white text-[10px] rounded-full">
-                {pendingContributions.length}
-              </span>
-            )}
-          </button>
-        )}
+        <button
+          onClick={() => setActiveTab('pending-payments')}
+          className={`pb-3 px-3 transition-colors flex items-center space-x-1.5 ${
+            activeTab === 'pending-payments'
+              ? 'border-b-2 border-[#7856FF] text-[#7856FF]'
+              : 'text-gray-500 hover:text-gray-900'
+          }`}
+        >
+          <Receipt className="w-4 h-4" />
+          <span>Pending Payments</span>
+          {pendingContributions.length > 0 && (
+            <span className="px-1.5 py-0.2 bg-[#7856FF] text-white text-[10px] rounded-full">
+              {pendingContributions.length}
+            </span>
+          )}
+        </button>
 
-        {!isSuperAdmin && (
-          <button
-            onClick={() => setActiveTab('payout-approvals')}
-            className={`pb-3 px-3 transition-colors flex items-center space-x-1.5 ${
-              activeTab === 'payout-approvals'
-                ? 'border-b-2 border-[#7856FF] text-[#7856FF]'
-                : 'text-gray-500 hover:text-gray-900'
-            }`}
-          >
-            <Banknote className="w-4 h-4" />
-            <span>Payout Approvals</span>
-            {actionablePayouts.length > 0 && (
-              <span className="px-1.5 py-0.2 bg-amber-500 text-white text-[10px] rounded-full">
-                {actionablePayouts.length}
-              </span>
-            )}
-          </button>
-        )}
+        <button
+          onClick={() => setActiveTab('payout-approvals')}
+          className={`pb-3 px-3 transition-colors flex items-center space-x-1.5 ${
+            activeTab === 'payout-approvals'
+              ? 'border-b-2 border-[#7856FF] text-[#7856FF]'
+              : 'text-gray-500 hover:text-gray-900'
+          }`}
+        >
+          <Banknote className="w-4 h-4" />
+          <span>Payout Approvals</span>
+          {actionablePayouts.length > 0 && (
+            <span className="px-1.5 py-0.2 bg-amber-500 text-white text-[10px] rounded-full">
+              {actionablePayouts.length}
+            </span>
+          )}
+        </button>
 
         <button
           onClick={() => setActiveTab('members')}
@@ -569,7 +556,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             activeTab === 'circles'
               ? 'border-b-2 border-[#7856FF] text-[#7856FF]'
               : 'text-gray-500 hover:text-gray-900'
-            }`}
+          }`}
         >
           <Sparkles className="w-4 h-4" />
           <span>Ekub Operations</span>
@@ -591,7 +578,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       </div>
 
       {/* TAB 1: PENDING PAYMENTS AUDIT */}
-      {!isSuperAdmin && activeTab === 'pending-payments' && (
+      {activeTab === 'pending-payments' && (
         <div className="space-y-4">
           <div className="flex justify-between items-center">
             <h2 className="text-sm font-bold uppercase tracking-wider text-gray-800">
@@ -694,7 +681,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       )}
 
       {/* TAB 2: PAYOUT APPROVALS & DISBURSEMENT */}
-      {!isSuperAdmin && activeTab === 'payout-approvals' && (
+      {activeTab === 'payout-approvals' && (
         <div className="space-y-4">
           <h2 className="text-sm font-bold uppercase tracking-wider text-gray-800">
             Guaranteed Draw Winners Awaiting Payout Processing ({actionablePayouts.length})
@@ -1172,7 +1159,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <button
               onClick={() => {
                 setLoadingAudit(true);
-                getAuditLogs(50, isSuperAdmin ? undefined : selectedEkubId)
+                getAuditLogs()
                   .then((logs) => setAuditLogs(Array.isArray(logs) ? logs : []))
                   .catch(() => setAuditLogs([]))
                   .finally(() => setLoadingAudit(false));

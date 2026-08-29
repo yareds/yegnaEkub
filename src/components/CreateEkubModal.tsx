@@ -17,11 +17,13 @@ import { createEkub, getAllUsers } from '../firebase/ekubService';
 import { ETHIOPIAN_BANK_ACCOUNTS } from '../data/demoData';
 
 interface CreateEkubModalProps {
+  ekubs: Ekub[];
   onClose: () => void;
   onSuccess: (ekub: Ekub) => void;
 }
 
 export const CreateEkubModal: React.FC<CreateEkubModalProps> = ({
+  ekubs,
   onClose,
   onSuccess,
 }) => {
@@ -54,7 +56,13 @@ export const CreateEkubModal: React.FC<CreateEkubModalProps> = ({
   React.useEffect(() => {
     if (assignAdminNow && platformUsers.length === 0 && !loadingPlatformUsers) {
       setLoadingPlatformUsers(true);
-      getAllUsers().then(setPlatformUsers).finally(() => setLoadingPlatformUsers(false));
+      getAllUsers().then((users) => {
+        // Only show people who aren't already administering another
+        // circle -- someone already assigned as an Ekub Admin elsewhere
+        // shouldn't show up as a candidate here.
+        const alreadyAdminUids = new Set(ekubs.map(e => e.adminId).filter(Boolean));
+        setPlatformUsers(users.filter(u => !alreadyAdminUids.has(u.uid)));
+      }).finally(() => setLoadingPlatformUsers(false));
     }
   }, [assignAdminNow]);
 
