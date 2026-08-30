@@ -49,7 +49,7 @@ import {
   joinEkub,
   getAuditLogs,
   getAllUsers,
-  seedSampleData
+  cleanupSampleData
 } from '../firebase/ekubService';
 import { ETHIOPIAN_BANK_ACCOUNTS } from '../data/demoData';
 
@@ -324,7 +324,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  // Handle Seed Sample Data (Super Admin)
+  // Handle Cleanup Sample Data (Super Admin, one-time utility -- removes
+  // whatever the old "Generate Sample Data" feature left in Firestore/Auth,
+  // now that sample browsing is handled entirely by local-only Demo Mode)
   const [seedingData, setSeedingData] = useState(false);
 
   const handleExecuteSeedSampleData = async () => {
@@ -332,15 +334,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setActionError('');
     setActionSuccess('');
     try {
-      const circles = await seedSampleData();
+      const result = await cleanupSampleData();
       setShowSeedConfirmModal(false);
       setActionSuccess(
-        `Successfully generated ${circles.length} sample circles: ` +
-        circles.map(c => `${c.name} (${c.memberCount} members, Admin: ${c.adminEmail})`).join('; ')
+        `Cleaned up ${result.deletedEkubIds.length} sample Ekub(s), ` +
+        `${result.deletedAuthUids.length} sample Admin account(s), and ` +
+        `${result.deletedProfileIds.length} associated profile document(s).`
       );
       onRefreshData();
     } catch (err: any) {
-      setActionError(err.message || 'Failed to generate sample data.');
+      setActionError(err.message || 'Failed to clean up sample data.');
     } finally {
       setSeedingData(false);
     }
@@ -449,10 +452,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 onClick={() => setShowSeedConfirmModal(true)}
                 disabled={seedingData}
                 className="px-4 py-2.5 bg-white/10 hover:bg-white/15 text-white border border-white/20 font-bold text-xs uppercase tracking-widest transition-all flex items-center space-x-1.5 rounded-lg disabled:opacity-50"
-                title="Creates 3 sample circles with real Admin accounts, for testing"
+                title="One-time cleanup: removes any leftover sample data from the old Generate Sample Data feature -- sample browsing now happens in Demo Mode instead, which never touches Firebase"
               >
                 <Sparkles className="w-4 h-4 text-[#C4B5FD]" />
-                <span>{seedingData ? 'Generating...' : 'Generate Sample Data'}</span>
+                <span>{seedingData ? 'Cleaning up...' : 'Clean Up Old Sample Data'}</span>
               </button>
             )}
 
@@ -1308,8 +1311,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <Sparkles className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold text-[#1C1132]">Generate Sample Circles &amp; Admins</h3>
-                  <p className="text-xs text-gray-500">Platform Demonstration &amp; Testing Suite</p>
+                  <h3 className="text-lg font-bold text-[#1C1132]">Clean Up Old Sample Data</h3>
+                  <p className="text-xs text-gray-500">One-time removal from Firestore &amp; Authentication</p>
                 </div>
               </div>
               <button 
@@ -1322,38 +1325,40 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
 
             <p className="text-xs text-gray-600 leading-relaxed">
-              This will provision <strong>3 realistic Ethiopian Ekub circles</strong> with complete member rosters and dedicated Circle Administrator accounts:
+              Sample circle browsing is now handled entirely by <strong>Demo Mode</strong> (available
+              right from the landing page), which never touches Firebase at all. This button removes
+              whatever the old "Generate Sample Data" feature already wrote for real:
             </p>
 
             <div className="space-y-2.5">
               <div className="p-3 bg-[#F8F7FC] border border-[#E6E1F5] rounded-xl text-xs space-y-1">
                 <div className="flex justify-between font-bold text-gray-900">
                   <span>1. Bole Daily Savers</span>
-                  <span className="text-[#7856FF] uppercase text-[10px]">Daily &middot; 10 Members</span>
+                  <span className="text-[#7856FF] uppercase text-[10px]">Ekub + Members</span>
                 </div>
-                <p className="text-gray-500 text-[11px]">500 ETB / day &middot; 5,000 ETB pool &middot; Admin: Abebe Bekele (<code>admin.bole.daily@yegnaekub-demo.et</code>)</p>
+                <p className="text-gray-500 text-[11px]">Plus Admin account: Abebe Bekele (<code>admin.bole.daily@yegnaekub-demo.et</code>)</p>
               </div>
 
               <div className="p-3 bg-[#F8F7FC] border border-[#E6E1F5] rounded-xl text-xs space-y-1">
                 <div className="flex justify-between font-bold text-gray-900">
                   <span>2. Merkato Weekly Circle</span>
-                  <span className="text-[#7856FF] uppercase text-[10px]">Weekly &middot; 20 Members</span>
+                  <span className="text-[#7856FF] uppercase text-[10px]">Ekub + Members</span>
                 </div>
-                <p className="text-gray-500 text-[11px]">2,000 ETB / week &middot; 40,000 ETB pool &middot; Admin: Selamawit Tesfaye (<code>admin.merkato.weekly@yegnaekub-demo.et</code>)</p>
+                <p className="text-gray-500 text-[11px]">Plus Admin account: Selamawit Tesfaye (<code>admin.merkato.weekly@yegnaekub-demo.et</code>)</p>
               </div>
 
               <div className="p-3 bg-[#F8F7FC] border border-[#E6E1F5] rounded-xl text-xs space-y-1">
                 <div className="flex justify-between font-bold text-gray-900">
                   <span>3. Piazza Monthly Cooperative</span>
-                  <span className="text-[#7856FF] uppercase text-[10px]">Monthly &middot; 30 Members</span>
+                  <span className="text-[#7856FF] uppercase text-[10px]">Ekub + Members</span>
                 </div>
-                <p className="text-gray-500 text-[11px]">5,000 ETB / month &middot; 150,000 ETB pool &middot; Admin: Dawit Alemu (<code>admin.piazza.monthly@yegnaekub-demo.et</code>)</p>
+                <p className="text-gray-500 text-[11px]">Plus Admin account: Dawit Alemu (<code>admin.piazza.monthly@yegnaekub-demo.et</code>)</p>
               </div>
             </div>
 
-            <div className="p-3 bg-purple-50 border border-purple-100 rounded-xl text-[11px] text-purple-900 flex items-start space-x-2">
-              <ShieldCheck className="w-4 h-4 text-[#7856FF] shrink-0 mt-0.5" />
-              <span>The Super Admin is maintained as a platform-level observer and is never enrolled as a member.</span>
+            <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-[11px] text-red-900 flex items-start space-x-2">
+              <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+              <span>This permanently deletes these Ekubs, their members, and both Admin accounts (Auth and any leftover profile documents, including orphaned duplicates from earlier testing). This cannot be undone.</span>
             </div>
 
             <div className="flex gap-2 pt-2">
@@ -1369,17 +1374,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 type="button"
                 disabled={seedingData}
                 onClick={handleExecuteSeedSampleData}
-                className="flex-1 py-2.5 text-xs font-bold uppercase tracking-wider text-white bg-[#7856FF] hover:bg-[#6340FF] rounded-xl shadow-md shadow-[#7856FF]/25 transition-all flex items-center justify-center space-x-2 disabled:opacity-50"
+                className="flex-1 py-2.5 text-xs font-bold uppercase tracking-wider text-white bg-red-600 hover:bg-red-700 rounded-xl shadow-md transition-all flex items-center justify-center space-x-2 disabled:opacity-50"
               >
                 {seedingData ? (
                   <>
                     <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent animate-spin rounded-full" />
-                    <span>Provisioning Circles...</span>
+                    <span>Cleaning Up...</span>
                   </>
                 ) : (
                   <>
                     <Sparkles className="w-4 h-4" />
-                    <span>Confirm &amp; Generate</span>
+                    <span>Confirm &amp; Delete</span>
                   </>
                 )}
               </button>

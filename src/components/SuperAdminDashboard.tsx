@@ -11,16 +11,16 @@ import {
   AlertCircle, 
   Plus, 
   FileText, 
-  ChevronRight,
-  TrendingUp,
-  RefreshCw,
-  Coins,
+  ChevronRight, 
+  TrendingUp, 
+  RefreshCw, 
+  Coins, 
   Scale
 } from 'lucide-react';
 import { useAuth } from '../firebase/AuthContext';
 import { useTranslation } from '../locales/TranslationContext';
 import { Ekub } from '../types';
-import { seedSampleData } from '../firebase/ekubService';
+import { cleanupSampleData } from '../firebase/ekubService';
 
 interface SuperAdminDashboardProps {
   ekubs: Ekub[];
@@ -56,15 +56,16 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     setActionError('');
     setActionSuccess('');
     try {
-      const circles = await seedSampleData();
+      const result = await cleanupSampleData();
       setShowSeedConfirmModal(false);
       setActionSuccess(
-        `Successfully generated ${circles.length} sample circles: ` +
-        circles.map(c => `${c.name} (${c.memberCount} members, Admin: ${c.adminEmail})`).join('; ')
+        `Cleaned up ${result.deletedEkubIds.length} sample Ekub(s), ` +
+        `${result.deletedAuthUids.length} sample Admin account(s), and ` +
+        `${result.deletedProfileIds.length} associated profile document(s).`
       );
       if (onRefreshData) onRefreshData();
     } catch (err: any) {
-      setActionError(err.message || 'Failed to generate sample data.');
+      setActionError(err.message || 'Failed to clean up sample data.');
     } finally {
       setSeedingData(false);
     }
@@ -115,7 +116,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
               title="Generate sample circles with distinct admin accounts"
             >
               <Sparkles className="w-4 h-4 text-[#C4B5FD]" />
-              <span>{seedingData ? 'Generating...' : 'Generate Sample Data'}</span>
+              <span>{seedingData ? 'Cleaning up...' : 'Clean Up Old Sample Data'}</span>
             </button>
 
             <button
@@ -289,7 +290,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                   <Sparkles className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold text-[#1C1132]">Generate Sample Circles &amp; Admins</h3>
+                  <h3 className="text-lg font-bold text-[#1C1132]">Clean Up Old Sample Data</h3>
                   <p className="text-xs text-gray-500">Platform Demonstration &amp; Testing Suite</p>
                 </div>
               </div>
@@ -355,7 +356,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                 {seedingData ? (
                   <>
                     <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent animate-spin rounded-full" />
-                    <span>Provisioning Circles...</span>
+                    <span>Cleaning Up...</span>
                   </>
                 ) : (
                   <>

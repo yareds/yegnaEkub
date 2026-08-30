@@ -1259,3 +1259,87 @@ export const seedSampleData = functions.https.onCall(async (data, context) => {
 
   return { success: true, circles: createdCircles };
 });
+
+// ============================================================================
+// 11. CLEANUP SAMPLE DATA (Super Admin only, one-time utility)
+//
+// Removes everything created by the old "Generate Sample Data" feature,
+// which wrote real data to Firestore/Auth. That feature has been replaced
+// by a fully local, no-backend Demo Mode (see App.tsx and data/demoData.ts)
+// -- this function exists purely to clean up the real data left behind by
+// the old approach: the three seed Ekub documents (and their members
+// subcollections), the three seed Admin accounts (both their Firebase Auth
+// users and Firestore profiles), and any orphaned duplicate profile
+// documents left over from testing (e.g. from deleting and recreating
+// these same test accounts).
+// ============================================================================
+export const cleanupSampleData = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated.');
+  }
+  const isSuper = await checkIsSuperAdmin(context.auth.uid, context.auth);
+  if (!isSuper) {
+    throw new functions.https.HttpsError('permission-denied', 'Only the Super Admin can clean up sample data.');
+  }
+
+  const seedAdminEmails = [
+    'admin.bole.daily@yegnaekub-demo.et',
+    'admin.merkato.weekly@yegnaekub-demo.et',
+    'admin.piazza.monthly@yegnaekub-demo.et',
+  ];
+
+  const deletedEkubIds: string[] = [];
+  const deletedAuthUids: string[] = [];
+  const deletedProfileIds: string[] = [];
+
+  // 1. Delete every Ekub document whose ID matches the old seed pattern,
+  // along with its members subcollection.
+  const ekubsSnap = await db.collection('ekubs').get();
+  for (const ekubDoc of ekubsSnap.docs) {
+    if (!ekubDoc.id.startsWith('ekub-seed-')) continue;
+    const membersSnap = await db.collection('ekubs').doc(ekubDoc.id).collection('members').get();
+    const batch = db.batch();
+    membersSnap.docs.forEach(m => batch.delete(m.ref));
+    batch.delete(ekubDoc.ref);
+    await batch.commit();
+    deletedEkubIds.push(ekubDoc.id);
+  }
+
+  // 2. Delete the three seed Admin accounts -- both their Firebase Auth
+  // user and every Firestore profile document tied to that email
+  // (including orphaned duplicates from earlier delete/recreate cycles).
+  for (const email of seedAdminEmails) {
+    try {
+      const userRecord = await admin.auth().getUserByEmail(email);
+      await admin.auth().deleteUser(userRecord.uid);
+      deletedAuthUids.push(userRecord.uid);
+    } catch (err: any) {
+      if (err.code !== 'auth/user-not-found') {
+        console.warn(`Failed to delete Auth user for ${email}:`, err);
+      }
+    }
+
+    const profilesSnap = await db.collection('users').where('email', '==', email).get();
+    for (const profileDoc of profilesSnap.docs) {
+      await profileDoc.ref.delete();
+      deletedProfileIds.push(profileDoc.id);
+    }
+  }
+
+  await writeAuditLog({
+    actorId: context.auth.uid,
+    actorName: 'Super Admin',
+    actorRole: 'super_admin',
+    action: 'SAMPLE_DATA_CLEANED_UP',
+    entityType: 'ekub',
+    entityId: 'multiple',
+    reason: `Removed ${deletedEkubIds.length} sample Ekub(s), ${deletedAuthUids.length} sample Admin account(s), and ${deletedProfileIds.length} associated profile document(s)`,
+  });
+
+  return {
+    success: true,
+    deletedEkubIds,
+    deletedAuthUids,
+    deletedProfileIds,
+  };
+});

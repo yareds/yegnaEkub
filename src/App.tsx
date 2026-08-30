@@ -48,12 +48,12 @@ const DEMO_PROFILES: Record<'super_admin' | 'ekub_admin' | 'member', UserProfile
     verificationStatus: 'verified', createdAt: new Date().toISOString(),
   } as UserProfile,
   ekub_admin: {
-    uid: 'demo-user-yared-admin', fullName: 'Yared Abegaz', email: 'yared.demo@yegnaekub-demo.et',
+    uid: 'demo-admin-merkato', fullName: 'Selamawit Tesfaye', email: 'admin.merkato.weekly@yegnaekub-demo.et',
     phoneNumber: '', photoURL: '', role: 'member', preferredLanguage: 'en',
     verificationStatus: 'verified', createdAt: new Date().toISOString(),
   } as UserProfile,
   member: {
-    uid: 'demo-user-abebe', fullName: 'Abebe Bikila', email: 'abebe.demo@yegnaekub-demo.et',
+    uid: 'demo-merkato-member-0', fullName: 'Rahel Getachew', email: 'rahel.getachew@example.et',
     phoneNumber: '', photoURL: '', role: 'member', preferredLanguage: 'en',
     verificationStatus: 'verified', createdAt: new Date().toISOString(),
   } as UserProfile,

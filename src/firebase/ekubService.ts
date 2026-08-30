@@ -439,11 +439,15 @@ export const getAllUsers = async (): Promise<UserProfile[]> => {
   }
 };
 
-export const seedSampleData = async (): Promise<Array<{ id: string; name: string; memberCount: number; adminEmail: string }>> => {
+// "Generate Sample Data" has been removed -- sample browsing is now handled
+// entirely by the local-only Demo Mode (see App.tsx / data/demoData.ts),
+// which never touches Firebase. This one-time utility removes whatever the
+// old feature already wrote to Firestore/Auth.
+export const cleanupSampleData = async (): Promise<{ deletedEkubIds: string[]; deletedAuthUids: string[]; deletedProfileIds: string[] }> => {
   assertNotDemoMode();
-  const fn = httpsCallable(functions, 'seedSampleData');
+  const fn = httpsCallable(functions, 'cleanupSampleData');
   const res = await fn({});
-  return (res.data as { circles: Array<{ id: string; name: string; memberCount: number; adminEmail: string }> }).circles || [];
+  return res.data as { deletedEkubIds: string[]; deletedAuthUids: string[]; deletedProfileIds: string[] };
 };
 
 // ==========================================
