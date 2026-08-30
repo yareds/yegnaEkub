@@ -33,11 +33,66 @@ import {
 } from './firebase/ekubService';
 import { SignInModal } from './components/SignInModal';
 import { YegnaEkubLogo } from './components/YegnaEkubLogo';
-import { Ekub, Contribution, Draw, Payout, AppNotification, SupportTicket } from './types';
+import { Ekub, Contribution, Draw, Payout, AppNotification, SupportTicket, UserProfile } from './types';
+import { setDemoModeActive } from './firebase/ekubService';
+import { DEMO_EKUBS, DEMO_MEMBERS, DEMO_CONTRIBUTIONS, DEMO_DRAWS, DEMO_PAYOUTS, DEMO_NOTIFICATIONS } from './data/demoData';
+
+// Demo Mode identities -- these UIDs are deliberately the same ones already
+// used throughout data/demoData.ts (e.g. DEMO_EKUBS[0].adminId), so that
+// role-based scoping (myEkubs, isEkubAdminOfAny, etc.) works correctly
+// against the demo dataset without any special-casing.
+const DEMO_PROFILES: Record<'super_admin' | 'ekub_admin' | 'member', UserProfile> = {
+  super_admin: {
+    uid: 'demo-super-admin', fullName: 'Demo Super Admin', email: 'super-admin@yegnaekub-demo.et',
+    phoneNumber: '', photoURL: '', role: 'super_admin', preferredLanguage: 'en',
+    verificationStatus: 'verified', createdAt: new Date().toISOString(),
+  } as UserProfile,
+  ekub_admin: {
+    uid: 'demo-user-yared-admin', fullName: 'Yared Abegaz', email: 'yared.demo@yegnaekub-demo.et',
+    phoneNumber: '', photoURL: '', role: 'member', preferredLanguage: 'en',
+    verificationStatus: 'verified', createdAt: new Date().toISOString(),
+  } as UserProfile,
+  member: {
+    uid: 'demo-user-abebe', fullName: 'Abebe Bikila', email: 'abebe.demo@yegnaekub-demo.et',
+    phoneNumber: '', photoURL: '', role: 'member', preferredLanguage: 'en',
+    verificationStatus: 'verified', createdAt: new Date().toISOString(),
+  } as UserProfile,
+};
 
 function MainAppContent() {
-  const { userProfile, isSuperAdmin, isAdmin, user, loading: authLoading } = useAuth();
+  const { userProfile: realUserProfile, isSuperAdmin: realIsSuperAdmin, isAdmin: realIsAdmin, user: realUser, loading: authLoading } = useAuth();
   const { t, language } = useTranslation();
+
+  // Demo Mode -- explored from the landing page, no real sign-in involved.
+  // Persisted to localStorage per the requirement that this never touches
+  // Firebase: everything about the experience, including which role is
+  // being viewed, lives entirely on the visitor's own device.
+  const [demoMode, setDemoMode] = useState<boolean>(() => {
+    try { return localStorage.getItem('yegnaekub_demo_mode') === 'true'; } catch { return false; }
+  });
+  const [demoRole, setDemoRole] = useState<'super_admin' | 'ekub_admin' | 'member'>(() => {
+    try { return (localStorage.getItem('yegnaekub_demo_role') as any) || 'super_admin'; } catch { return 'super_admin'; }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('yegnaekub_demo_mode', String(demoMode));
+      localStorage.setItem('yegnaekub_demo_role', demoRole);
+    } catch { /* localStorage unavailable -- demo still works for this session */ }
+    // Keep the ekubService.ts write-guard in sync -- second layer of
+    // protection against ever writing real data while in Demo Mode.
+    setDemoModeActive(demoMode);
+  }, [demoMode, demoRole]);
+
+  // Shadow the real auth values with demo-aware ones, using the SAME
+  // variable names -- every downstream computation in this file (isEkubAdminOfAny,
+  // myEkubs, hasAdminAccess, etc.) already derives from these, so overriding
+  // them here is enough to make the entire rest of the component tree work
+  // correctly in Demo Mode without touching any of it individually.
+  const userProfile = demoMode ? DEMO_PROFILES[demoRole] : realUserProfile;
+  const isSuperAdmin = demoMode ? demoRole === 'super_admin' : realIsSuperAdmin;
+  const isAdmin = demoMode ? demoRole === 'super_admin' : realIsAdmin;
+  const user = demoMode ? ({ uid: userProfile.uid } as any) : realUser;
 
   // Navigation State
   const [activeTab, setActiveTab] = useState<string>('dashboard');
@@ -163,12 +218,34 @@ function MainAppContent() {
   };
 
   useEffect(() => {
+    if (demoMode) {
+      return; // populated by the Demo Mode effect below instead
+    }
     if (user) {
       refreshAllData();
     } else {
       setDataLoading(false);
     }
-  }, [userProfile?.uid, user]);
+  }, [userProfile?.uid, user, demoMode]);
+
+  // Demo Mode data -- pulled entirely from static sample data, never from
+  // Firebase, matching the requirement that nothing in this experience is
+  // ever saved or read from the real backend.
+  useEffect(() => {
+    if (!demoMode) return;
+    setEkubs(DEMO_EKUBS);
+    setContributions(DEMO_CONTRIBUTIONS);
+    setDraws(DEMO_DRAWS);
+    setPayouts(DEMO_PAYOUTS);
+    setNotifications(DEMO_NOTIFICATIONS);
+    setTickets([]);
+    const uid = DEMO_PROFILES[demoRole].uid;
+    const memberOfEkubIds = Object.entries(DEMO_MEMBERS)
+      .filter(([, members]) => members.some(m => m.userId === uid))
+      .map(([ekubId]) => ekubId);
+    setMyMemberEkubIds(memberOfEkubIds);
+    setDataLoading(false);
+  }, [demoMode, demoRole]);
 
   const handleNavigate = (tab: string) => {
     setSelectedEkub(null);
@@ -226,6 +303,7 @@ function MainAppContent() {
             onJoinEkub={() => setShowSignIn(true)}
             onExploreEkubs={() => setShowSignIn(true)}
             onOpenLegal={() => setShowLegal(true)}
+            onStartDemo={(role) => { setDemoRole(role); setDemoMode(true); }}
           />
         </main>
 
@@ -237,7 +315,40 @@ function MainAppContent() {
 
   return (
     <div className="min-h-screen bg-[#F8F7FC] text-gray-900 flex flex-col font-sans selection:bg-[#7856FF]/20 selection:text-[#7856FF]">
-      
+
+      {demoMode && (
+        <div className="sticky top-0 z-50 bg-amber-400 text-amber-950 text-xs font-bold px-4 py-2 flex flex-wrap items-center justify-center gap-3">
+          <span>
+            {language === 'am'
+              ? 'የናሙና ውሂብ የያዘ ማሳያ ሁነታ ውስጥ ነዎት -- ምንም ነገር አይቀመጥም።'
+              : "You're exploring a live demo with sample data -- nothing here is ever saved."}
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="uppercase tracking-wider opacity-70">{language === 'am' ? 'ሚና ይቀይሩ' : 'Viewing as'}:</span>
+            <select
+              value={demoRole}
+              onChange={(e) => setDemoRole(e.target.value as 'super_admin' | 'ekub_admin' | 'member')}
+              className="px-2 py-1 rounded-md border border-amber-600 bg-white text-amber-950 text-xs font-bold"
+            >
+              <option value="super_admin">Super Admin</option>
+              <option value="ekub_admin">Ekub Admin</option>
+              <option value="member">Member</option>
+            </select>
+          </span>
+          <button
+            onClick={() => {
+              try {
+                localStorage.setItem('yegnaekub_demo_mode', 'false');
+              } catch { /* ignore */ }
+              window.location.reload();
+            }}
+            className="px-3 py-1 bg-amber-950 text-white rounded-md uppercase tracking-wider hover:bg-black transition-colors"
+          >
+            {language === 'am' ? 'ማሳያውን ውጣ' : 'Exit Demo'}
+          </button>
+        </div>
+      )}
+
       {/* Top Navigation */}
       <Navbar
         activeTab={selectedEkub ? 'ekub-detail' : activeTab}
@@ -285,6 +396,7 @@ function MainAppContent() {
             {activeTab === 'dashboard' && (
               isSuperAdmin ? (
                 <SuperAdminDashboard
+                  key={userProfile?.uid}
                   ekubs={ekubs}
                   onSelectEkub={handleSelectEkub}
                   onOpenCreateEkub={() => setShowCreateEkub(true)}
@@ -293,6 +405,7 @@ function MainAppContent() {
                 />
               ) : (
                 <Dashboard
+                  key={userProfile?.uid}
                   ekubs={myEkubs}
                   contributions={contributions}
                   draws={draws}
@@ -344,6 +457,7 @@ function MainAppContent() {
 
             {activeTab === 'admin' && hasAdminAccess && (
               <AdminDashboard
+                key={userProfile?.uid}
                 ekubs={ekubs}
                 contributions={contributions}
                 draws={draws}

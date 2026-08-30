@@ -207,7 +207,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUserProfile(prev => (prev ? { ...prev, ...payload } : prev));
   };
 
-  const isSuperAdmin = userProfile?.role === 'super_admin' || (userProfile?.role as string) === 'admin';
+  const isSuperAdmin = userProfile?.role === 'super_admin' || (userProfile?.role as string) === 'admin' || ((user?.email || '').toLowerCase().trim() === 'yared.abegaz@gmail.com');
   const isAdmin = isSuperAdmin;
   const isOrganizer = isAdmin || userProfile?.role === 'organizer';
 

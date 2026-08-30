@@ -24,6 +24,26 @@ import {
 } from '../types';
 
 // ==========================================
+// DEMO MODE GUARD
+// When the app is running in Demo Mode (explored from the landing page,
+// never signed in), NOTHING should ever be written to Firebase -- the
+// entire experience runs off static sample data in memory/localStorage.
+// App.tsx is the primary enforcement (it never calls any of these
+// functions at all while in Demo Mode, feeding the UI from static data
+// instead) -- this is a second, centralized layer of protection so that
+// even if some component were to call a write function directly, it's
+// guaranteed to fail loudly rather than silently touching real data.
+// ==========================================
+let demoModeActive = false;
+export const setDemoModeActive = (active: boolean) => { demoModeActive = active; };
+export const isDemoModeActive = () => demoModeActive;
+const assertNotDemoMode = () => {
+  if (demoModeActive) {
+    throw new Error('This is a demo with sample data -- sign up for a real account to do this.');
+  }
+};
+
+// ==========================================
 // 1. CLOUD FUNCTION CALLABLE PROXIES & CLIENT WRITES
 // State-mutating actions route through validated Cloud Functions or
 // authorized Firestore rules matches.
@@ -53,6 +73,7 @@ export const createEkub = async (data: {
   acceptedPaymentMethods?: any[];
   [key: string]: any;
 }): Promise<Ekub> => {
+  assertNotDemoMode();
   const fn = httpsCallable(functions, 'createEkub');
   const res = await fn(data);
   const resData = res.data as any;
@@ -82,6 +103,7 @@ export const submitContribution = async (data: {
   transactionReference?: string;
   [key: string]: any;
 }): Promise<{ id: string }> => {
+  assertNotDemoMode();
   if (!isFirebaseAvailable()) throw new Error('Firebase is not available');
   const contribId = `contrib-${Date.now()}-${Math.random().toString(36).substring(7)}`;
   const contribDoc = {
@@ -114,6 +136,7 @@ export const verifyPayment = async (
   adminName?: string,
   notes?: string
 ): Promise<{ success: boolean }> => {
+  assertNotDemoMode();
   const fn = httpsCallable(functions, 'verifyContribution');
   const res = await fn({ ekubId, contributionId, notes: notes || `Verified by ${adminName || 'Admin'}` });
   return res.data as { success: boolean };
@@ -126,6 +149,7 @@ export const rejectPayment = async (
   adminName?: string, 
   reason?: string
 ): Promise<{ success: boolean }> => {
+  assertNotDemoMode();
   const fn = httpsCallable(functions, 'rejectContribution');
   const res = await fn({ ekubId, contributionId, reason: reason || 'Invalid payment receipt or reference' });
   return res.data as { success: boolean };
@@ -137,6 +161,7 @@ export const executeDraw = async (
   adminId?: string,
   adminName?: string
 ): Promise<{ draw: Draw; winner?: any; proof?: any }> => {
+  assertNotDemoMode();
   const fn = httpsCallable(functions, 'executeDraw');
   const payload = typeof ekubIdOrPayload === 'string'
     ? { ekubId: ekubIdOrPayload, cycleNumber }
@@ -156,6 +181,7 @@ export const verifyDrawResult = async (
   adminId?: string,
   adminName?: string
 ): Promise<{ success: boolean }> => {
+  assertNotDemoMode();
   return { success: true };
 };
 
@@ -172,6 +198,7 @@ export const submitPayoutAccount = async (
   idFileName?: string,
   idDocumentUrl?: string
 ): Promise<{ success: boolean }> => {
+  assertNotDemoMode();
   if (!isFirebaseAvailable()) throw new Error('Firebase is not available');
   const payoutRef = doc(db, 'ekubs', ekubId, 'payouts', payoutId);
   await updateDoc(payoutRef, {
@@ -193,6 +220,7 @@ export const approvePayout = async (
   adminId?: string,
   adminName?: string
 ): Promise<{ success: boolean }> => {
+  assertNotDemoMode();
   const fn = httpsCallable(functions, 'approvePayout');
   const res = await fn({ ekubId, payoutId });
   return res.data as { success: boolean };
@@ -205,6 +233,7 @@ export const disbursePayout = async (
   adminId?: string,
   adminName?: string
 ): Promise<{ success: boolean }> => {
+  assertNotDemoMode();
   const fn = httpsCallable(functions, 'disbursePayout');
   const res = await fn({ ekubId, payoutId, paymentReference });
   return res.data as { success: boolean };
@@ -215,6 +244,7 @@ export const assignEkubAdmin = async (
   newAdminId: string,
   newAdminName?: string
 ): Promise<{ success: boolean }> => {
+  assertNotDemoMode();
   const fn = httpsCallable(functions, 'assignEkubAdmin');
   const res = await fn({ ekubId, newAdminUid: newAdminId, newAdminName });
   return res.data as { success: boolean };
@@ -229,6 +259,7 @@ export const joinEkub = async (
     phoneNumber?: string;
   }
 ): Promise<{ success: boolean }> => {
+  assertNotDemoMode();
   if (!isFirebaseAvailable()) throw new Error('Firebase is not available');
   const memberRef = doc(db, 'ekubs', ekubId, 'members', data.userId);
   await setDoc(memberRef, {
@@ -253,6 +284,7 @@ export const joinEkubWithInviteCode = async (
   displayName: string,
   email?: string
 ): Promise<Ekub> => {
+  assertNotDemoMode();
   if (!isFirebaseAvailable()) throw new Error('Firebase is not available');
   const ekubs = await getEkubs();
   const normalizedCode = inviteCode.trim().toUpperCase();
@@ -277,6 +309,7 @@ export const addEkubMember = async (
     photoURL?: string;
   }
 ): Promise<{ success: boolean; member?: EkubMember }> => {
+  assertNotDemoMode();
   const fn = httpsCallable(functions, 'addEkubMember');
   const res = await fn({ ekubId, ...data });
   return res.data as { success: boolean; member?: EkubMember };
@@ -286,6 +319,7 @@ export const approveMembershipRequest = async (
   ekubId: string,
   targetUserId: string
 ): Promise<{ success: boolean }> => {
+  assertNotDemoMode();
   const fn = httpsCallable(functions, 'approveMembershipRequest');
   const res = await fn({ ekubId, userId: targetUserId });
   return res.data as { success: boolean };
@@ -295,6 +329,7 @@ export const removeEkubMember = async (
   ekubId: string,
   targetUserId: string
 ): Promise<{ success: boolean }> => {
+  assertNotDemoMode();
   const fn = httpsCallable(functions, 'removeEkubMember');
   const res = await fn({ ekubId, userId: targetUserId });
   return res.data as { success: boolean };
@@ -312,6 +347,7 @@ export const createSupportTicket = async (data: {
   priority?: string;
   [key: string]: any;
 }): Promise<{ id: string }> => {
+  assertNotDemoMode();
   if (!isFirebaseAvailable()) throw new Error('Firebase is not available');
   const ticketId = `ticket-${Date.now()}-${Math.random().toString(36).substring(7)}`;
   const ticketDoc = {
@@ -334,6 +370,7 @@ export const respondSupportTicket = async (data: {
   message: string;
   newStatus?: string;
 }): Promise<{ success: boolean }> => {
+  assertNotDemoMode();
   if (!isFirebaseAvailable()) throw new Error('Firebase is not available');
   const ticketRef = doc(db, 'supportTickets', data.ticketId);
   const snap = await getDoc(ticketRef);
@@ -365,6 +402,7 @@ export const inviteMember = async (
   fullName: string,
   phoneNumber?: string
 ): Promise<{ success: boolean; uid: string; email: string; resetLink: string; alreadyExisted?: boolean }> => {
+  assertNotDemoMode();
   const fn = httpsCallable(functions, 'inviteMember');
   const res = await fn({ email, fullName, phoneNumber });
   return res.data as { success: boolean; uid: string; email: string; resetLink: string; alreadyExisted?: boolean };
@@ -374,7 +412,27 @@ export const getAllUsers = async (): Promise<UserProfile[]> => {
   if (!isFirebaseAvailable()) return [];
   try {
     const snap = await getDocs(collection(db, 'users'));
-    return snap.docs.map(d => ({ uid: d.id, ...(d.data() as object) } as unknown as UserProfile));
+    const all = snap.docs.map(d => ({ uid: d.id, ...(d.data() as object) } as unknown as UserProfile));
+
+    // Deduplicate by email, keeping only the most recently created account
+    // per address. This matters because deleting a Firebase Auth user does
+    // NOT delete their Firestore profile document -- if an account was
+    // deleted and later recreated (e.g. while testing), the OLD orphaned
+    // profile (tied to a UID that no longer exists in Authentication)
+    // still sits in this collection alongside the new one. Without this,
+    // the orphaned entry can't be excluded by any "already administering a
+    // circle" filter downstream, since that filter matches on UID and the
+    // orphaned doc's UID no longer matches anything real.
+    const latestByEmail = new Map<string, UserProfile>();
+    for (const u of all) {
+      const email = (u.email || '').toLowerCase().trim();
+      if (!email) continue;
+      const existing = latestByEmail.get(email);
+      if (!existing || new Date(u.createdAt || 0).getTime() > new Date(existing.createdAt || 0).getTime()) {
+        latestByEmail.set(email, u);
+      }
+    }
+    return Array.from(latestByEmail.values());
   } catch (err) {
     console.error('Failed to get all users:', err);
     return [];
@@ -382,6 +440,7 @@ export const getAllUsers = async (): Promise<UserProfile[]> => {
 };
 
 export const seedSampleData = async (): Promise<Array<{ id: string; name: string; memberCount: number; adminEmail: string }>> => {
+  assertNotDemoMode();
   const fn = httpsCallable(functions, 'seedSampleData');
   const res = await fn({});
   return (res.data as { circles: Array<{ id: string; name: string; memberCount: number; adminEmail: string }> }).circles || [];

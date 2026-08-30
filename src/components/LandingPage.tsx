@@ -28,6 +28,9 @@ interface LandingPageProps {
    *  only meaningful for them. Defaults to false (safe default for the
    *  logged-out public landing page, where nobody's role is known yet). */
   isAdmin?: boolean;
+  /** Starts a fully local Demo Mode -- browses the app as the chosen role
+   *  using static sample data. Nothing in this mode ever touches Firebase. */
+  onStartDemo?: (role: 'super_admin' | 'ekub_admin' | 'member') => void;
 }
 
 export const LandingPage: React.FC<LandingPageProps> = ({
@@ -36,6 +39,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   onExploreEkubs,
   onOpenLegal,
   isAdmin = false,
+  onStartDemo,
 }) => {
   const { t, language } = useTranslation();
 
@@ -107,6 +111,39 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               {!isAdmin && <ArrowRight className="w-4 h-4" />}
             </button>
           </div>
+
+          {onStartDemo && (
+            <div className="mt-8 pt-6 border-t border-white/10 max-w-lg mx-auto">
+              <p className="text-[11px] uppercase tracking-widest text-white/50 font-bold mb-3">
+                {language === 'am' ? 'ወይም ማንኛውንም ሂሳብ ሳይፈጥሩ ይመልከቱ' : 'Or explore first, no account needed'}
+              </p>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <button
+                  onClick={() => onStartDemo('super_admin')}
+                  className="px-4 py-2 bg-white/5 hover:bg-white/15 text-white/90 text-[11px] font-bold uppercase tracking-wider border border-white/15 rounded-lg transition-colors"
+                >
+                  {language === 'am' ? 'እንደ ሱፐር አድሚን ይመልከቱ' : 'View as Super Admin'}
+                </button>
+                <button
+                  onClick={() => onStartDemo('ekub_admin')}
+                  className="px-4 py-2 bg-white/5 hover:bg-white/15 text-white/90 text-[11px] font-bold uppercase tracking-wider border border-white/15 rounded-lg transition-colors"
+                >
+                  {language === 'am' ? 'እንደ ዕቁብ አድሚን ይመልከቱ' : 'View as Ekub Admin'}
+                </button>
+                <button
+                  onClick={() => onStartDemo('member')}
+                  className="px-4 py-2 bg-white/5 hover:bg-white/15 text-white/90 text-[11px] font-bold uppercase tracking-wider border border-white/15 rounded-lg transition-colors"
+                >
+                  {language === 'am' ? 'እንደ አባል ይመልከቱ' : 'View as Member'}
+                </button>
+              </div>
+              <p className="text-[10px] text-white/40 mt-2.5">
+                {language === 'am'
+                  ? 'የናሙና ውሂብ ብቻ ነው የሚያሳየው -- ምንም ነገር አይቀመጥም።'
+                  : 'Shows sample data only -- nothing you see or do here is ever saved.'}
+              </p>
+            </div>
+          )}
 
           {/* Quick trust strip */}
           <div className="mt-12 pt-8 border-t border-white/10 grid grid-cols-2 md:grid-cols-4 gap-4 text-center">

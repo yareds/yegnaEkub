@@ -77,6 +77,40 @@
         "createdAt": { "type": "string" }
       },
       "required": ["id", "ekubId", "cycleNumber", "winnerId", "amount", "status"]
+    },
+    "SupportTicket": {
+      "title": "SupportTicket",
+      "description": "Dispute or assistance ticket filed by member or admin.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "ekubId": { "type": "string" },
+        "subject": { "type": "string" },
+        "category": { "type": "string" },
+        "description": { "type": "string" },
+        "status": { "type": "string" },
+        "priority": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "subject", "category", "description", "status"]
+    },
+    "AppNotification": {
+      "title": "AppNotification",
+      "description": "In-app notifications for contributions, draws, and payouts.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "read": { "type": "boolean" },
+        "type": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "title", "message", "read"]
     }
   },
   "firestore": {
@@ -95,6 +129,14 @@
     "/ekubs/{ekubId}/payouts/{payoutId}": {
       "schema": "Payout",
       "description": "Winner payout pipeline"
+    },
+    "/supportTickets/{ticketId}": {
+      "schema": "SupportTicket",
+      "description": "Support tickets and dispute inquiries"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "AppNotification",
+      "description": "User in-app notifications"
     }
   }
 }
