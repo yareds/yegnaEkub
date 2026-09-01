@@ -1,4 +1,4 @@
-import { Ekub, EkubMember, Contribution, Draw, Payout, AppNotification, AuditLog } from '../types';
+import { Ekub, EkubMember, Contribution, Draw, Payout, AppNotification, AuditLog, UserProfile } from '../types';
 
 // ============================================================================
 // Demo Mode dataset -- modeled on the three sample circles (Bole Daily
@@ -165,6 +165,21 @@ export const DEMO_MEMBERS: Record<string, EkubMember[]> = Object.fromEntries(
   CIRCLES.map((c) => [c.ekubId, buildMembers(c)])
 );
 
+// Used by getAllUsers() in Demo Mode -- so admin-assignment pickers show
+// something sensible while browsing, even though nothing can actually be
+// submitted (writes are blocked entirely in Demo Mode).
+export const DEMO_USERS: UserProfile[] = CIRCLES.map((c) => ({
+  uid: c.adminUid,
+  fullName: c.adminName,
+  email: `admin.${c.ekubId.replace('demo-ekub-', '').replace(/-/g, '.')}@yegnaekub-demo.et`,
+  phoneNumber: '',
+  photoURL: '',
+  role: 'member',
+  preferredLanguage: 'en',
+  verificationStatus: 'verified',
+  createdAt: '2026-08-01T09:00:00Z',
+} as UserProfile));
+
 export const DEMO_CONTRIBUTIONS: Contribution[] = CIRCLES.flatMap((c) => {
   const members = DEMO_MEMBERS[c.ekubId].filter(m => m.contributionStatus === 'paid');
   return members.slice(0, 4).map((m, idx) => ({
@@ -252,7 +267,6 @@ export const DEMO_AUDIT_LOGS: AuditLog[] = [
     action: 'EKUB_CREATED',
     entityType: 'ekub',
     entityId: 'demo-ekub-merkato-weekly',
-    ekubId: 'demo-ekub-merkato-weekly',
     reason: 'Created Merkato Weekly Circle with Selamawit Tesfaye as Admin',
     timestamp: nextDate(-10),
   } as AuditLog,

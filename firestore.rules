@@ -175,30 +175,28 @@ service cloud.firestore {
     // NOTIFICATIONS COLLECTION
     // ==========================================================================
     match /notifications/{notificationId} {
-      allow get: if isAuthenticated() &&
-        (resource.data.userId == request.auth.uid || resource.data.userId == 'all' || isSuperAdmin());
+      allow read: if isAuthenticated();
 
-      allow list: if isAuthenticated() &&
-        (resource.data.userId == request.auth.uid || isSuperAdmin());
+      allow create: if isAuthenticated();
 
-      allow create: if isSuperAdmin() || (
-        isAuthenticated() &&
-        (request.resource.data.userId == request.auth.uid || request.resource.data.userId == 'all')
+      allow update: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid ||
+        resource.data.userId == 'all' ||
+        isSuperAdmin()
       );
 
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
-
-      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid ||
+        isSuperAdmin()
+      );
     }
 
     // ==========================================================================
     // AUDIT LOGS -- append-only
     // ==========================================================================
     match /auditLogs/{logId} {
-      allow read: if isSuperAdmin() ||
-        (isAuthenticated() && resource.data.ekubId != null && isEkubAdmin(resource.data.ekubId));
-      allow create: if isSuperAdmin();
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
       allow update, delete: if false;
     }
 
@@ -206,18 +204,11 @@ service cloud.firestore {
     // SUPPORT TICKETS
     // ==========================================================================
     match /supportTickets/{ticketId} {
-      allow get: if isSuperAdmin() ||
-        (isAuthenticated() && resource.data.userId == request.auth.uid) ||
-        (isAuthenticated() && resource.data.ekubId != null && isEkubAdmin(resource.data.ekubId));
-
-      allow list: if isSuperAdmin() ||
-        (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow read: if isAuthenticated();
 
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
 
-      allow update: if isSuperAdmin() ||
-        (isAuthenticated() && resource.data.userId == request.auth.uid) ||
-        (isAuthenticated() && resource.data.ekubId != null && isEkubAdmin(resource.data.ekubId));
+      allow update: if isAuthenticated();
 
       allow delete: if isSuperAdmin();
     }

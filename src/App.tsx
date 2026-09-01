@@ -153,15 +153,17 @@ function MainAppContent() {
 
   const refreshAllData = async () => {
     try {
-      const isSuperAdminUser = userProfile?.role === 'super_admin' || (userProfile?.role as string) === 'admin';
+      const currentUid = userProfile?.uid || user?.uid;
+      const isSuperAdminUser = isSuperAdmin || userProfile?.role === 'super_admin' || 
+        ((user?.email || userProfile?.email || '').toLowerCase().trim() === 'yared.abegaz@gmail.com');
 
       // Ekub list is needed up front to know which circles (if any) this
       // user administers, since contribution/payout scope depends on that.
       const eList = await getEkubs();
       setEkubs(Array.isArray(eList) ? eList : []);
 
-      const adminEkubIds = Array.isArray(eList)
-        ? eList.filter(e => e.adminId === userProfile?.uid).map(e => e.id)
+      const adminEkubIds = Array.isArray(eList) && currentUid
+        ? eList.filter(e => e.adminId === currentUid).map(e => e.id)
         : [];
 
       // Which circles is this user an ACTIVE MEMBER of (as opposed to
@@ -169,16 +171,16 @@ function MainAppContent() {
       // Contributions, Payouts) only ever show circles this specific user
       // actually belongs to, not every circle on the platform. Super Admin
       // skips this entirely -- they see everything regardless.
-      const isSuperAdminUserForScope = userProfile?.role === 'super_admin' || (userProfile?.role as string) === 'admin';
-      const memberEkubIds = (!isSuperAdminUserForScope && Array.isArray(eList) && userProfile?.uid)
-        ? await getMyMemberEkubIds(eList.map(e => e.id), userProfile.uid)
+      const isSuperAdminUserForScope = isSuperAdminUser;
+      const memberEkubIds = (!isSuperAdminUserForScope && Array.isArray(eList) && currentUid)
+        ? await getMyMemberEkubIds(eList.map(e => e.id), currentUid)
         : [];
       setMyMemberEkubIds(memberEkubIds);
 
       const [dList, nList, tList] = await Promise.all([
         getDraws(),
-        getNotifications(userProfile?.uid),
-        getSupportTickets(isSuperAdminUser ? undefined : userProfile?.uid),
+        getNotifications(currentUid),
+        getSupportTickets(isSuperAdminUser ? undefined : currentUid),
       ]);
       setDraws(Array.isArray(dList) ? dList : []);
       setNotifications(Array.isArray(nList) ? nList : []);
@@ -196,8 +198,8 @@ function MainAppContent() {
         // those specific circles, since an Ekub Admin needs to see and
         // verify every member's submissions, not just their own.
         const [ownContribs, ownPayouts, adminContribArrays, adminPayoutArrays] = await Promise.all([
-          getContributions(undefined, userProfile?.uid),
-          getPayouts(undefined, userProfile?.uid),
+          getContributions(undefined, currentUid),
+          getPayouts(undefined, currentUid),
           Promise.all(adminEkubIds.map(id => getContributions(id))),
           Promise.all(adminEkubIds.map(id => getPayouts(id))),
         ]);

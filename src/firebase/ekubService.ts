@@ -22,6 +22,16 @@ import {
   AuditLog,
   UserProfile
 } from '../types';
+import { 
+  DEMO_MEMBERS, 
+  DEMO_USERS, 
+  DEMO_AUDIT_LOGS,
+  DEMO_EKUBS,
+  DEMO_CONTRIBUTIONS,
+  DEMO_DRAWS,
+  DEMO_PAYOUTS,
+  DEMO_NOTIFICATIONS
+} from '../data/demoData';
 
 // ==========================================
 // DEMO MODE GUARD
@@ -409,6 +419,9 @@ export const inviteMember = async (
 };
 
 export const getAllUsers = async (): Promise<UserProfile[]> => {
+  if (isDemoModeActive()) {
+    return DEMO_USERS;
+  }
   if (!isFirebaseAvailable()) return [];
   try {
     const snap = await getDocs(collection(db, 'users'));
@@ -456,6 +469,9 @@ export const cleanupSampleData = async (): Promise<{ deletedEkubIds: string[]; d
 // ==========================================
 
 export const getEkubs = async (): Promise<Ekub[]> => {
+  if (isDemoModeActive()) {
+    return DEMO_EKUBS;
+  }
   if (!isFirebaseAvailable()) return [];
   try {
     const snap = await getDocs(collection(db, 'ekubs'));
@@ -468,6 +484,9 @@ export const getEkubs = async (): Promise<Ekub[]> => {
 };
 
 export const getEkubById = async (id: string): Promise<Ekub | null> => {
+  if (isDemoModeActive()) {
+    return DEMO_EKUBS.find(e => e.id === id) || null;
+  }
   if (!isFirebaseAvailable()) return null;
   try {
     const snap = await getDoc(doc(db, 'ekubs', id));
@@ -480,6 +499,9 @@ export const getEkubById = async (id: string): Promise<Ekub | null> => {
 };
 
 export const getEkubMembers = async (ekubId: string): Promise<EkubMember[]> => {
+  if (isDemoModeActive()) {
+    return DEMO_MEMBERS[ekubId] || [];
+  }
   if (!isFirebaseAvailable() || !ekubId) return [];
   try {
     const snap = await getDocs(collection(db, 'ekubs', ekubId, 'members'));
@@ -500,6 +522,11 @@ export const getEkubMembers = async (ekubId: string): Promise<EkubMember[]> => {
  * and broader read permissions.
  */
 export const getMyMemberEkubIds = async (ekubIds: string[], targetUserId: string): Promise<string[]> => {
+  if (isDemoModeActive()) {
+    return Object.entries(DEMO_MEMBERS)
+      .filter(([ekubId, members]) => ekubIds.includes(ekubId) && members.some(m => m.userId === targetUserId && m.status === 'active'))
+      .map(([ekubId]) => ekubId);
+  }
   if (!isFirebaseAvailable() || !targetUserId || !Array.isArray(ekubIds) || ekubIds.length === 0) {
     return [];
   }
@@ -523,6 +550,12 @@ export const getMyMemberEkubIds = async (ekubIds: string[], targetUserId: string
 };
 
 export const getContributions = async (ekubId?: string, userId?: string): Promise<Contribution[]> => {
+  if (isDemoModeActive()) {
+    let list = DEMO_CONTRIBUTIONS;
+    if (ekubId) list = list.filter(c => c.ekubId === ekubId);
+    if (userId) list = list.filter(c => c.userId === userId);
+    return list;
+  }
   if (!isFirebaseAvailable()) return [];
   try {
     if (ekubId) {
@@ -560,6 +593,9 @@ export const getContributions = async (ekubId?: string, userId?: string): Promis
 };
 
 export const getDraws = async (ekubId?: string): Promise<Draw[]> => {
+  if (isDemoModeActive()) {
+    return ekubId ? DEMO_DRAWS.filter(d => d.ekubId === ekubId) : DEMO_DRAWS;
+  }
   if (!isFirebaseAvailable()) return [];
   try {
     if (ekubId) {
@@ -590,6 +626,12 @@ export const getDraws = async (ekubId?: string): Promise<Draw[]> => {
 };
 
 export const getPayouts = async (ekubId?: string, winnerId?: string): Promise<Payout[]> => {
+  if (isDemoModeActive()) {
+    let list = DEMO_PAYOUTS;
+    if (ekubId) list = list.filter(p => p.ekubId === ekubId);
+    if (winnerId) list = list.filter(p => p.winnerId === winnerId);
+    return list;
+  }
   if (!isFirebaseAvailable()) return [];
   try {
     if (ekubId) {
@@ -627,6 +669,9 @@ export const getPayouts = async (ekubId?: string, winnerId?: string): Promise<Pa
 };
 
 export const getSupportTickets = async (userId?: string): Promise<SupportTicket[]> => {
+  if (isDemoModeActive()) {
+    return [];
+  }
   if (!isFirebaseAvailable()) return [];
   try {
     let q;
@@ -645,6 +690,9 @@ export const getSupportTickets = async (userId?: string): Promise<SupportTicket[
 };
 
 export const getNotifications = async (userId?: string): Promise<AppNotification[]> => {
+  if (isDemoModeActive()) {
+    return DEMO_NOTIFICATIONS;
+  }
   if (!isFirebaseAvailable() || !userId) return [];
   try {
     const q = query(
@@ -677,6 +725,9 @@ export const markNotificationsAsRead = async (userId?: string): Promise<void> =>
 };
 
 export const getAuditLogs = async (limitCount = 50, ekubId?: string): Promise<AuditLog[]> => {
+  if (isDemoModeActive()) {
+    return ekubId ? DEMO_AUDIT_LOGS.filter(a => a.entityId === ekubId) : DEMO_AUDIT_LOGS;
+  }
   if (!isFirebaseAvailable()) return [];
   try {
     let q;
