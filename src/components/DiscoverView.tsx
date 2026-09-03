@@ -19,14 +19,12 @@ interface DiscoverViewProps {
   ekubs: Ekub[];
   onSelectEkub: (ekub: Ekub) => void;
   onOpenCreate: () => void;
-  onOpenJoin: () => void;
 }
 
 export const DiscoverView: React.FC<DiscoverViewProps> = ({
   ekubs,
   onSelectEkub,
   onOpenCreate,
-  onOpenJoin,
 }) => {
   const { isAdmin } = useAuth();
   const { t, language } = useTranslation();
@@ -63,18 +61,17 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
             {t.exploreEkubs}
           </h1>
           <p className="text-xs text-white/80 mt-1 max-w-xl">
-            Join vetted Ethiopian digital Ekub savings circles or initialize a private circle for your trusted circle of friends, merchants, or colleagues.
+            {language === 'am'
+              ? 'የተረጋገጡ የኢትዮጵያ ዲጂታል የዕቁብ ቁጠባ ቡድኖችን ያስሱ። አባላት የሚቀላቀሉት በቡድን አስተዳዳሪ ቀጥተኛ ግብዣ ብቻ ነው።'
+              : 'Browse vetted Ethiopian digital Ekub savings circles. Membership is strictly managed via invitations by the designated group admin.'}
           </p>
         </div>
 
         <div className="flex flex-wrap gap-2.5 relative z-10">
-          <button
-            onClick={onOpenJoin}
-            className="px-4 py-2.5 bg-white/10 hover:bg-white/20 text-[#C4B5FD] border border-white/20 font-bold text-xs uppercase tracking-widest transition-all flex items-center space-x-1.5 rounded-xl"
-          >
-            <KeyRound className="w-4 h-4 text-[#7856FF]" />
-            <span>{t.joinEkub}</span>
-          </button>
+          <div className="px-4 py-2.5 bg-white/10 text-[#C4B5FD] border border-white/20 font-bold text-xs uppercase tracking-widest flex items-center space-x-1.5 rounded-xl">
+            <ShieldCheck className="w-4 h-4 text-[#7856FF]" />
+            <span>{language === 'am' ? 'በአስተዳዳሪ ግብዣ ብቻ' : 'Admin Invitation Only'}</span>
+          </div>
 
           {isAdmin && (
             <button

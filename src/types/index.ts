@@ -11,6 +11,8 @@ export interface UserProfile {
   phoneNumber: string;
   photoURL?: string;
   role: UserRole;
+  ekubId?: string;
+  ekubName?: string;
   preferredLanguage: 'en' | 'am';
   preferredPaymentMethod?: PreferredPaymentMethod;
   verificationStatus: VerificationStatus;
@@ -69,13 +71,17 @@ export interface EkubMember {
   role: 'admin' | 'member';
   status: 'active' | 'pending' | 'suspended';
   joinedAt: string;
-  contributionStatus: 'paid' | 'pending' | 'overdue';
+  contributionStatus: 'paid' | 'pending' | 'due' | 'overdue';
   eligibleForDraw: boolean;
   hasReceivedPayout: boolean;
   payoutCycle?: number;
   totalContributed: number;
   lastContributionDate?: string;
   cyclePosition?: number;
+  lastSmsReminderDate?: string;
+  lastSmsReminderType?: '3_day_reminder' | 'overdue_alert' | 'manual_reminder';
+  daysOverdue?: number;
+  cycleDueDate?: string;
   updatedAt?: string;
 }
 
@@ -234,6 +240,7 @@ export type NotificationType =
   | 'member_joined'
   | 'admin_assigned'
   | 'contribution_reminder'
+  | 'overdue_alert'
   | 'payment_submitted'
   | 'payment_verified'
   | 'payment_rejected'
@@ -254,6 +261,11 @@ export interface AppNotification {
   type: NotificationType;
   read: boolean;
   link?: string;
+  channel?: 'in_app' | 'sms' | 'both';
+  recipientPhone?: string;
+  smsDelivered?: boolean;
+  smsSentAt?: string;
+  daysBeforeDue?: number;
   metadata?: Record<string, unknown>;
   createdAt: string;
 }

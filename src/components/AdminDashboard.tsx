@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Users, 
   Receipt, 
@@ -22,7 +22,12 @@ import {
   Copy,
   Check,
   Send,
-  UserPlus
+  UserPlus,
+  Phone,
+  MessageSquare,
+  AlertTriangle,
+  Calendar,
+  Smartphone
 } from 'lucide-react';
 import { useAuth } from '../firebase/AuthContext';
 import { useTranslation } from '../locales/TranslationContext';
@@ -48,9 +53,15 @@ import {
   inviteMember,
   joinEkub,
   getAuditLogs,
-  getAllUsers,
-  cleanupSampleData
+  getAllUsers
 } from '../firebase/ekubService';
+import { 
+  evaluateMemberContribution, 
+  dispatchMemberSms, 
+  runAutomaticDueDateCheck, 
+  MemberContributionEvaluation,
+  buildSmsMessage
+} from '../firebase/dueDateService';
 import { ETHIOPIAN_BANK_ACCOUNTS } from '../data/demoData';
 
 interface AdminDashboardProps {
@@ -63,6 +74,9 @@ interface AdminDashboardProps {
   onOpenLiveDraw: (ekub: Ekub) => void;
   onOpenVerifyDraw: (draw: Draw) => void;
   onOpenCreateEkub: () => void;
+  isSuperAdmin?: boolean;
+  isAdmin?: boolean;
+  userProfile?: UserProfile | null;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
@@ -75,8 +89,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onOpenLiveDraw,
   onOpenVerifyDraw,
   onOpenCreateEkub,
+  isSuperAdmin: propIsSuperAdmin,
+  isAdmin: propIsAdmin,
+  userProfile: propUserProfile,
 }) => {
-  const { userProfile, isAdmin, isSuperAdmin } = useAuth();
+  const auth = useAuth();
+  const userProfile = propUserProfile !== undefined ? propUserProfile : auth.userProfile;
+  const isSuperAdmin = propIsSuperAdmin !== undefined ? propIsSuperAdmin : auth.isSuperAdmin;
+  const isAdmin = propIsAdmin !== undefined ? propIsAdmin : auth.isAdmin;
   const { t, language } = useTranslation();
 
   // Ekub Admins must only ever see/select circles they actually administer
@@ -86,20 +106,33 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // and needs the full list to reassign any circle.
   const accessibleEkubs = isSuperAdmin ? ekubs : ekubs.filter(e => e.adminId === userProfile?.uid);
 
-  // Active Sub-Tab: Super Admin defaults to 'circles', Ekub Admin defaults to 'pending-payments'
-  const [activeTab, setActiveTab] = useState<'pending-payments' | 'payout-approvals' | 'members' | 'reassign' | 'invite' | 'circles' | 'audit'>(
-    isSuperAdmin ? 'circles' : 'pending-payments'
+  // Active Sub-Tab: Super Admin defaults to 'circles', Ekub Admin defaults to 'due-dates' / 'pending-payments'
+  const [activeTab, setActiveTab] = useState<'pending-payments' | 'due-dates' | 'payout-approvals' | 'members' | 'reassign' | 'invite' | 'circles' | 'audit'>(
+    isSuperAdmin ? 'circles' : 'due-dates'
   );
+
+  // Due Date & SMS State
+  const [dueStatusFilter, setDueStatusFilter] = useState<'all' | 'overdue' | 'due' | 'upcoming' | 'paid'>('all');
+  const [syncingDueDates, setSyncingDueDates] = useState(false);
+  const [smsModalTarget, setSmsModalTarget] = useState<MemberContributionEvaluation | null>(null);
+  const [smsModalType, setSmsModalType] = useState<'3_day_reminder' | 'overdue_alert' | 'manual_reminder'>('3_day_reminder');
+  const [smsDispatching, setSmsDispatching] = useState(false);
 
   // Ensure Super Admin is never on operational payment/payout tabs
   React.useEffect(() => {
-    if (isSuperAdmin && (activeTab === 'pending-payments' || activeTab === 'payout-approvals')) {
+    if (isSuperAdmin && (activeTab === 'pending-payments' || activeTab === 'payout-approvals' || activeTab === 'due-dates')) {
       setActiveTab('circles');
     }
   }, [isSuperAdmin, activeTab]);
 
   // Selected Circle for Member Roster / Operations
   const [selectedEkubId, setSelectedEkubId] = useState<string>(accessibleEkubs[0]?.id || '');
+
+  React.useEffect(() => {
+    if (!selectedEkubId && accessibleEkubs.length > 0) {
+      setSelectedEkubId(accessibleEkubs[0].id);
+    }
+  }, [accessibleEkubs, selectedEkubId]);
   const [members, setMembers] = useState<EkubMember[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
 
@@ -131,7 +164,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [actionError, setActionError] = useState<string>('');
 
   // Modals & confirmation dialogs (safe for sandboxed iframes)
-  const [showSeedConfirmModal, setShowSeedConfirmModal] = useState(false);
   const [memberToRemove, setMemberToRemove] = useState<EkubMember | null>(null);
 
   // Disburse modal / inline input
@@ -324,31 +356,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  // Handle Cleanup Sample Data (Super Admin, one-time utility -- removes
-  // whatever the old "Generate Sample Data" feature left in Firestore/Auth,
-  // now that sample browsing is handled entirely by local-only Demo Mode)
-  const [seedingData, setSeedingData] = useState(false);
-
-  const handleExecuteSeedSampleData = async () => {
-    setSeedingData(true);
-    setActionError('');
-    setActionSuccess('');
-    try {
-      const result = await cleanupSampleData();
-      setShowSeedConfirmModal(false);
-      setActionSuccess(
-        `Cleaned up ${result.deletedEkubIds.length} sample Ekub(s), ` +
-        `${result.deletedAuthUids.length} sample Admin account(s), and ` +
-        `${result.deletedProfileIds.length} associated profile document(s).`
-      );
-      onRefreshData();
-    } catch (err: any) {
-      setActionError(err.message || 'Failed to clean up sample data.');
-    } finally {
-      setSeedingData(false);
-    }
-  };
-
   const handleInviteMember = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inviteEmail.trim() || !inviteFullName.trim()) return;
@@ -404,6 +411,85 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
+  // Computed evaluations for members in the selected Ekub
+  const memberEvaluations = useMemo<MemberContributionEvaluation[]>(() => {
+    if (!selectedEkub || members.length === 0) return [];
+    return members.map(m => {
+      const userDoc = rawPlatformUsers.find(u => u.uid === m.userId);
+      return evaluateMemberContribution(selectedEkub, m, contributions, userDoc);
+    });
+  }, [selectedEkub, members, contributions, rawPlatformUsers]);
+
+  const overdueEvaluationsCount = memberEvaluations.filter(e => e.isOverdue).length;
+  const dueSoonEvaluationsCount = memberEvaluations.filter(e => e.isDueSoon).length;
+  const upcomingEvaluationsCount = memberEvaluations.filter(e => e.status === 'upcoming').length;
+  const paidEvaluationsCount = memberEvaluations.filter(e => e.status === 'paid').length;
+
+  const filteredEvaluations = useMemo(() => {
+    return memberEvaluations.filter(e => {
+      if (dueStatusFilter === 'overdue') return e.isOverdue;
+      if (dueStatusFilter === 'due') return e.isDueSoon || e.status === 'due';
+      if (dueStatusFilter === 'upcoming') return e.status === 'upcoming';
+      if (dueStatusFilter === 'paid') return e.status === 'paid';
+      return true;
+    });
+  }, [memberEvaluations, dueStatusFilter]);
+
+  // Handle Synchronizing Due Dates and Triggering 3-Day SMS Notifications (Ekub Admin only)
+  const handleSyncDueDatesAndSms = async () => {
+    if (isSuperAdmin) return;
+    setSyncingDueDates(true);
+    setActionError('');
+    setActionSuccess('');
+    try {
+      const targetEkubs = accessibleEkubs.length > 0 ? accessibleEkubs : [selectedEkub].filter(Boolean);
+      const membersMap: Record<string, EkubMember[]> = {
+        [selectedEkubId]: members
+      };
+      
+      const result = await runAutomaticDueDateCheck(targetEkubs, membersMap, contributions, rawPlatformUsers);
+      
+      setActionSuccess(
+        `Automatic due date & SMS sync complete: Evaluated ${result.totalChecked} member(s). ` +
+        `Dispatched ${result.smsSentCount} SMS notification(s) across Ethio Telecom SMS gateway.`
+      );
+      
+      if (selectedEkubId) {
+        const m = await getEkubMembers(selectedEkubId);
+        setMembers(Array.isArray(m) ? m : []);
+      }
+      onRefreshData();
+    } catch (err: any) {
+      setActionError(err.message || 'Failed to sync due dates and SMS reminders.');
+    } finally {
+      setSyncingDueDates(false);
+    }
+  };
+
+  // Handle single SMS dispatch from modal (Ekub Admin only)
+  const handleSendSingleSms = async () => {
+    if (isSuperAdmin || !smsModalTarget) return;
+    setSmsDispatching(true);
+    try {
+      const res = await dispatchMemberSms(smsModalTarget, smsModalType);
+      if (res.success) {
+        setActionSuccess(`SMS successfully sent to ${smsModalTarget.displayName} (${smsModalTarget.phoneNumber || 'Recipient'}): "${res.text.substring(0, 50)}..."`);
+        setSmsModalTarget(null);
+        if (selectedEkubId) {
+          const m = await getEkubMembers(selectedEkubId);
+          setMembers(Array.isArray(m) ? m : []);
+        }
+        onRefreshData();
+      } else {
+        setActionError(`Failed to dispatch SMS: Recipient phone number missing or invalid.`);
+      }
+    } catch (err: any) {
+      setActionError(err.message || 'SMS dispatch failed.');
+    } finally {
+      setSmsDispatching(false);
+    }
+  };
+
   const pendingContributions = (contributions || []).filter(c => c.status === 'pending');
   const actionablePayouts = (payouts || []).filter(p => p.status === 'documents_required' || p.status === 'under_review' || p.status === 'approved' || p.status === 'pending');
 
@@ -447,15 +533,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </button>
             )}
 
-            {isSuperAdmin && (
+            {!isSuperAdmin && (
               <button
-                onClick={() => setShowSeedConfirmModal(true)}
-                disabled={seedingData}
-                className="px-4 py-2.5 bg-white/10 hover:bg-white/15 text-white border border-white/20 font-bold text-xs uppercase tracking-widest transition-all flex items-center space-x-1.5 rounded-lg disabled:opacity-50"
-                title="One-time cleanup: removes any leftover sample data from the old Generate Sample Data feature -- sample browsing now happens in Demo Mode instead, which never touches Firebase"
+                onClick={handleSyncDueDatesAndSms}
+                disabled={syncingDueDates}
+                className="px-3.5 py-2.5 bg-[#7856FF] hover:bg-[#6340FF] text-white font-bold text-xs uppercase tracking-widest shadow-md transition-all flex items-center space-x-1.5 rounded-lg disabled:opacity-50"
+                title="Automatically scans all members, dispatches 3-day SMS notices to phone numbers, and flags overdue unpaid contributions in red"
               >
-                <Sparkles className="w-4 h-4 text-[#C4B5FD]" />
-                <span>{seedingData ? 'Cleaning up...' : 'Clean Up Old Sample Data'}</span>
+                <MessageSquare className="w-3.5 h-3.5 text-white" />
+                <span>{syncingDueDates ? 'Checking Due Dates...' : 'Sync Due Dates & SMS'}</span>
               </button>
             )}
 
@@ -495,9 +581,74 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       )}
 
+      {/* Overdue Contribution Critical Red Alert Banner */}
+      {!isSuperAdmin && overdueEvaluationsCount > 0 && (
+        <div className="p-4 sm:p-5 bg-red-50 border-2 border-red-500/80 rounded-2xl shadow-sm text-red-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-start space-x-3">
+            <div className="w-9 h-9 rounded-xl bg-red-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+              <AlertTriangle className="w-5 h-5 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <h3 className="text-sm font-black uppercase tracking-wider text-red-900">
+                  ⚠️ Overdue Contribution Alert: {overdueEvaluationsCount} Member(s) Unpaid
+                </h3>
+                <span className="px-2 py-0.5 bg-red-600 text-white text-[10px] font-black uppercase tracking-widest rounded-full">
+                  Marked in Red
+                </span>
+              </div>
+              <p className="text-xs text-red-700 mt-0.5 leading-relaxed">
+                Members marked in <strong className="text-red-900 font-bold underline">RED</strong> below have missed their cycle contribution deadline. Live draw eligibility is suspended until payments are received and verified.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+            <button
+              onClick={() => {
+                setActiveTab('due-dates');
+                setDueStatusFilter('overdue');
+              }}
+              className="px-3.5 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold uppercase tracking-wider rounded-lg transition-colors shadow-xs"
+            >
+              View Overdue ({overdueEvaluationsCount})
+            </button>
+            <button
+              onClick={handleSyncDueDatesAndSms}
+              disabled={syncingDueDates}
+              className="px-3 py-1.5 bg-white border border-red-300 text-red-700 hover:bg-red-100/60 text-xs font-bold uppercase tracking-wider rounded-lg transition-colors"
+            >
+              Dispatch Overdue SMS
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Secondary Sub-Tabs */}
       <div className="flex flex-wrap border-b border-[#E6E1F5] gap-2 pb-px text-xs font-bold uppercase tracking-wider">
         {/* Ekub Admin Operational Tabs */}
+        {!isSuperAdmin && (
+          <button
+            onClick={() => setActiveTab('due-dates')}
+            className={`pb-3 px-3 transition-colors flex items-center space-x-1.5 ${
+              activeTab === 'due-dates'
+                ? 'border-b-2 border-[#7856FF] text-[#7856FF]'
+                : 'text-gray-500 hover:text-gray-900'
+            }`}
+          >
+            <Calendar className="w-4 h-4" />
+            <span>Due Dates &amp; Member SMS</span>
+            {overdueEvaluationsCount > 0 ? (
+              <span className="px-2 py-0.5 bg-red-600 text-white text-[10px] font-bold rounded-full animate-pulse shadow-xs">
+                {overdueEvaluationsCount} Overdue
+              </span>
+            ) : dueSoonEvaluationsCount > 0 ? (
+              <span className="px-1.5 py-0.5 bg-amber-500 text-white text-[10px] font-bold rounded-full">
+                {dueSoonEvaluationsCount} Due Soon
+              </span>
+            ) : null}
+          </button>
+        )}
+
         {!isSuperAdmin && (
           <button
             onClick={() => setActiveTab('pending-payments')}
@@ -508,7 +659,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             }`}
           >
             <Receipt className="w-4 h-4" />
-            <span>Pending Payments</span>
+            <span>Pending Receipts</span>
             {pendingContributions.length > 0 && (
               <span className="px-1.5 py-0.2 bg-[#7856FF] text-white text-[10px] rounded-full">
                 {pendingContributions.length}
@@ -617,6 +768,351 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </button>
         )}
       </div>
+
+      {/* TAB 0: DUE DATES & MEMBER SMS REMINDERS (Ekub Admin only) */}
+      {activeTab === 'due-dates' && !isSuperAdmin && (
+        <div className="space-y-5">
+          {/* Header & Circle Selector */}
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+            <div>
+              <div className="flex items-center space-x-2">
+                <h2 className="text-sm font-bold uppercase tracking-wider text-gray-800">
+                  Member Contribution Due Dates &amp; Automated SMS Ledger
+                </h2>
+                {overdueEvaluationsCount > 0 && (
+                  <span className="px-2 py-0.5 bg-red-600 text-white text-[10px] font-black uppercase tracking-widest rounded-full animate-pulse">
+                    {overdueEvaluationsCount} Overdue
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Automated 3-day SMS reminder engine via Ethio Telecom SMS Gateway. Missed due dates automatically flag members in red.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <select
+                value={selectedEkubId}
+                onChange={(e) => setSelectedEkubId(e.target.value)}
+                className="flex-1 sm:flex-none px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs font-bold text-gray-800 focus:outline-none focus:border-[#7856FF]"
+              >
+                {accessibleEkubs.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.name} (Cycle #{e.currentCycle || 1})
+                  </option>
+                ))}
+              </select>
+
+              <button
+                onClick={handleSyncDueDatesAndSms}
+                disabled={syncingDueDates}
+                className="px-3.5 py-2 bg-[#7856FF] hover:bg-[#6340FF] text-white text-xs font-bold uppercase tracking-wider rounded-lg shadow-sm transition-all flex items-center space-x-1.5 shrink-0 disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${syncingDueDates ? 'animate-spin' : ''}`} />
+                <span>{syncingDueDates ? 'Scanning...' : 'Sync Due Dates'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Quick Metrics Bar */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div 
+              onClick={() => setDueStatusFilter('overdue')}
+              className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
+                dueStatusFilter === 'overdue' 
+                  ? 'bg-red-50 border-red-400 ring-2 ring-red-500/20' 
+                  : 'bg-white border-[#E6E1F5] hover:border-red-300'
+              }`}
+            >
+              <div className="flex justify-between items-center text-xs">
+                <span className="font-bold text-red-700 uppercase tracking-wider text-[10px]">Overdue (Unpaid)</span>
+                <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse" />
+              </div>
+              <p className="text-2xl font-black text-red-600 mt-1">{overdueEvaluationsCount}</p>
+              <p className="text-[10px] text-red-600/80 mt-0.5">Flagged in red • Ineligible for draw</p>
+            </div>
+
+            <div 
+              onClick={() => setDueStatusFilter('due')}
+              className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
+                dueStatusFilter === 'due' 
+                  ? 'bg-amber-50 border-amber-400 ring-2 ring-amber-500/20' 
+                  : 'bg-white border-[#E6E1F5] hover:border-amber-300'
+              }`}
+            >
+              <div className="flex justify-between items-center text-xs">
+                <span className="font-bold text-amber-700 uppercase tracking-wider text-[10px]">Due Soon (≤ 3 Days)</span>
+                <Clock className="w-3.5 h-3.5 text-amber-600" />
+              </div>
+              <p className="text-2xl font-black text-amber-600 mt-1">{dueSoonEvaluationsCount}</p>
+              <p className="text-[10px] text-amber-700/80 mt-0.5">3-Day SMS reminders active</p>
+            </div>
+
+            <div 
+              onClick={() => setDueStatusFilter('upcoming')}
+              className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
+                dueStatusFilter === 'upcoming' 
+                  ? 'bg-blue-50 border-blue-400 ring-2 ring-blue-500/20' 
+                  : 'bg-white border-[#E6E1F5] hover:border-blue-300'
+              }`}
+            >
+              <div className="flex justify-between items-center text-xs">
+                <span className="font-bold text-blue-700 uppercase tracking-wider text-[10px]">Upcoming Cycles</span>
+                <Calendar className="w-3.5 h-3.5 text-blue-600" />
+              </div>
+              <p className="text-2xl font-black text-blue-600 mt-1">{upcomingEvaluationsCount}</p>
+              <p className="text-[10px] text-blue-700/80 mt-0.5">Due in &gt; 3 days</p>
+            </div>
+
+            <div 
+              onClick={() => setDueStatusFilter('paid')}
+              className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
+                dueStatusFilter === 'paid' 
+                  ? 'bg-green-50 border-green-400 ring-2 ring-green-500/20' 
+                  : 'bg-white border-[#E6E1F5] hover:border-green-300'
+              }`}
+            >
+              <div className="flex justify-between items-center text-xs">
+                <span className="font-bold text-green-700 uppercase tracking-wider text-[10px]">Paid &amp; Verified</span>
+                <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />
+              </div>
+              <p className="text-2xl font-black text-green-600 mt-1">{paidEvaluationsCount}</p>
+              <p className="text-[10px] text-green-700/80 mt-0.5">Draw eligible confirmed</p>
+            </div>
+          </div>
+
+          {/* Filter Pills */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+            <button
+              onClick={() => setDueStatusFilter('all')}
+              className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-colors border ${
+                dueStatusFilter === 'all'
+                  ? 'bg-[#1C1132] text-white border-[#1C1132]'
+                  : 'bg-white text-gray-600 border-[#E6E1F5] hover:bg-gray-50'
+              }`}
+            >
+              All Members ({memberEvaluations.length})
+            </button>
+            <button
+              onClick={() => setDueStatusFilter('overdue')}
+              className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-colors border ${
+                dueStatusFilter === 'overdue'
+                  ? 'bg-red-600 text-white border-red-600 shadow-xs'
+                  : 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100'
+              }`}
+            >
+              Overdue ({overdueEvaluationsCount})
+            </button>
+            <button
+              onClick={() => setDueStatusFilter('due')}
+              className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-colors border ${
+                dueStatusFilter === 'due'
+                  ? 'bg-amber-500 text-white border-amber-500 shadow-xs'
+                  : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
+              }`}
+            >
+              Due Soon - 3-Day SMS ({dueSoonEvaluationsCount})
+            </button>
+            <button
+              onClick={() => setDueStatusFilter('upcoming')}
+              className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-colors border ${
+                dueStatusFilter === 'upcoming'
+                  ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                  : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
+              }`}
+            >
+              Upcoming ({upcomingEvaluationsCount})
+            </button>
+            <button
+              onClick={() => setDueStatusFilter('paid')}
+              className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider rounded-lg transition-colors border ${
+                dueStatusFilter === 'paid'
+                  ? 'bg-green-600 text-white border-green-600 shadow-xs'
+                  : 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100'
+              }`}
+            >
+              Paid &amp; Verified ({paidEvaluationsCount})
+            </button>
+          </div>
+
+          {/* Members Due Date Table */}
+          {loadingMembers ? (
+            <div className="p-12 text-center bg-white border border-[#E6E1F5] rounded-xl">
+              <div className="w-8 h-8 border-2 border-[#7856FF] border-t-transparent animate-spin rounded-full mx-auto mb-2" />
+              <p className="text-xs text-gray-500 uppercase tracking-wider">Evaluating Due Dates &amp; SMS Status...</p>
+            </div>
+          ) : filteredEvaluations.length === 0 ? (
+            <div className="bg-white p-12 text-center border border-[#E6E1F5] rounded-xl">
+              <CheckCircle2 className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+              <h3 className="text-sm font-bold text-gray-900">No Members Match Selected Filter</h3>
+              <p className="text-xs text-gray-500 mt-1">Try selecting another filter above or switch the circle.</p>
+            </div>
+          ) : (
+            <div className="bg-white border border-[#E6E1F5] rounded-xl overflow-hidden shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-[#F8F7FC] border-b border-[#E6E1F5] text-gray-500 uppercase tracking-wider text-[10px]">
+                    <tr>
+                      <th className="py-3 px-4">Member &amp; Phone</th>
+                      <th className="py-3 px-4">Contribution Required</th>
+                      <th className="py-3 px-4">Due Date &amp; Timeline</th>
+                      <th className="py-3 px-4">Payment Status</th>
+                      <th className="py-3 px-4">SMS Notice Tracking</th>
+                      <th className="py-3 px-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {filteredEvaluations.map((ev) => (
+                      <tr 
+                        key={ev.userId} 
+                        className={`transition-colors ${
+                          ev.isOverdue 
+                            ? 'bg-red-50/80 hover:bg-red-100/60 border-l-4 border-l-red-600' 
+                            : ev.isDueSoon 
+                            ? 'bg-amber-50/40 hover:bg-amber-50/80 border-l-4 border-l-amber-500' 
+                            : 'hover:bg-gray-50/60'
+                        }`}
+                      >
+                        <td className="py-3.5 px-4">
+                          <p className={`font-bold ${ev.isOverdue ? 'text-red-950 font-black' : 'text-gray-900'}`}>
+                            {ev.displayName}
+                          </p>
+                          <div className="flex items-center space-x-1 text-[11px] text-gray-500 mt-0.5">
+                            <Phone className="w-3 h-3 text-gray-400 shrink-0" />
+                            <span className="font-mono">{ev.phoneNumber || ev.email || 'No phone'}</span>
+                          </div>
+                        </td>
+
+                        <td className="py-3.5 px-4">
+                          <p className="font-bold text-gray-900 font-mono">
+                            {ev.contributionAmount.toLocaleString()} ETB
+                          </p>
+                          <span className="text-[10px] uppercase font-bold text-[#7856FF]">
+                            Cycle #{ev.cycleNumber}
+                          </span>
+                        </td>
+
+                        <td className="py-3.5 px-4">
+                          <p className={`font-bold text-xs ${ev.isOverdue ? 'text-red-700 font-black' : 'text-gray-800'}`}>
+                            {ev.dueDate}
+                          </p>
+                          <p className="text-[10px] text-gray-500 mt-0.5">
+                            {ev.isOverdue ? (
+                              <span className="text-red-700 font-bold">⚠️ Missed ({ev.daysOverdue} day{ev.daysOverdue === 1 ? '' : 's'} past due)</span>
+                            ) : ev.isDueSoon ? (
+                              <span className="text-amber-700 font-bold">⏰ {ev.daysRemaining} day{ev.daysRemaining === 1 ? '' : 's'} left</span>
+                            ) : ev.status === 'paid' ? (
+                              <span className="text-green-700 font-medium">Verified for this cycle</span>
+                            ) : (
+                              <span>Due in {ev.daysRemaining} days</span>
+                            )}
+                          </p>
+                        </td>
+
+                        <td className="py-3.5 px-4">
+                          {ev.isOverdue ? (
+                            <div>
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-red-600 text-white font-black uppercase text-[10px] tracking-wider shadow-xs animate-pulse">
+                                <AlertTriangle className="w-3 h-3" />
+                                OVERDUE (UNPAID)
+                              </span>
+                              <p className="text-[10px] text-red-700 font-bold mt-1">Draw Ineligible</p>
+                            </div>
+                          ) : ev.isDueSoon ? (
+                            <div>
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300 font-bold uppercase text-[10px] tracking-wider">
+                                <Clock className="w-3 h-3 text-amber-600" />
+                                DUE SOON (3-DAY)
+                              </span>
+                              <p className="text-[10px] text-amber-700 font-medium mt-1">Pending receipt</p>
+                            </div>
+                          ) : ev.status === 'paid' ? (
+                            <div>
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded bg-green-50 text-green-700 border border-green-200 font-bold uppercase text-[10px] tracking-wider">
+                                <CheckCircle2 className="w-3 h-3 text-green-600" />
+                                PAID &amp; VERIFIED
+                              </span>
+                              <p className="text-[10px] text-green-700 font-medium mt-1">Draw Eligible</p>
+                            </div>
+                          ) : ev.status === 'pending' ? (
+                            <div>
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded bg-purple-50 text-[#7856FF] border border-purple-200 font-bold uppercase text-[10px] tracking-wider">
+                                <Receipt className="w-3 h-3 text-[#7856FF]" />
+                                UNDER AUDIT
+                              </span>
+                              <p className="text-[10px] text-purple-700 font-medium mt-1">Receipt uploaded</p>
+                            </div>
+                          ) : (
+                            <div>
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 font-bold uppercase text-[10px] tracking-wider">
+                                UPCOMING
+                              </span>
+                              <p className="text-[10px] text-gray-500 font-medium mt-1">Awaiting due window</p>
+                            </div>
+                          )}
+                        </td>
+
+                        <td className="py-3.5 px-4">
+                          {ev.smsStatus?.reminderSentAt || ev.smsStatus?.overdueAlertSentAt ? (
+                            <div className="space-y-0.5">
+                              <span className="inline-flex items-center space-x-1 px-2 py-0.5 bg-purple-100 text-[#7856FF] border border-purple-200 rounded text-[9px] font-bold uppercase tracking-wider">
+                                <MessageSquare className="w-2.5 h-2.5" />
+                                <span>SMS Sent</span>
+                              </span>
+                              <p className="text-[10px] text-gray-500">
+                                {new Date(ev.smsStatus.overdueAlertSentAt || ev.smsStatus.reminderSentAt || '').toLocaleDateString()}
+                              </p>
+                            </div>
+                          ) : (
+                            <span className="text-[10px] text-gray-400 font-mono">Not dispatched</span>
+                          )}
+                        </td>
+
+                        <td className="py-3.5 px-4 text-right">
+                          {ev.isOverdue ? (
+                            <button
+                              onClick={() => {
+                                setSmsModalTarget(ev);
+                                setSmsModalType('overdue_alert');
+                              }}
+                              className="px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white font-bold rounded text-[10px] uppercase tracking-wider transition-colors inline-flex items-center space-x-1 shadow-xs"
+                            >
+                              <Send className="w-3 h-3" />
+                              <span>SMS Overdue Alert</span>
+                            </button>
+                          ) : ev.isDueSoon ? (
+                            <button
+                              onClick={() => {
+                                setSmsModalTarget(ev);
+                                setSmsModalType('3_day_reminder');
+                              }}
+                              className="px-2.5 py-1 bg-[#7856FF] hover:bg-[#6340FF] text-white font-bold rounded text-[10px] uppercase tracking-wider transition-colors inline-flex items-center space-x-1 shadow-xs"
+                            >
+                              <Send className="w-3 h-3" />
+                              <span>Send 3-Day SMS</span>
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                setSmsModalTarget(ev);
+                                setSmsModalType('manual_reminder');
+                              }}
+                              className="px-2 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded text-[10px] uppercase tracking-wider transition-colors inline-flex items-center space-x-1"
+                            >
+                              <MessageSquare className="w-3 h-3" />
+                              <span>Custom SMS</span>
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* TAB 1: PENDING PAYMENTS AUDIT (Ekub Admin only) */}
       {activeTab === 'pending-payments' && !isSuperAdmin && (
@@ -853,77 +1349,160 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <tr>
                       <th className="py-3 px-4">Member</th>
                       <th className="py-3 px-4">Role</th>
-                      <th className="py-3 px-4">Status</th>
+                      <th className="py-3 px-4">Membership</th>
+                      <th className="py-3 px-4">Cycle Due Date &amp; Status</th>
                       <th className="py-3 px-4">Draw Eligibility</th>
                       <th className="py-3 px-4">Total Contributed</th>
                       <th className="py-3 px-4 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {members.map((m) => (
-                      <tr key={m.userId} className="hover:bg-gray-50 transition-colors">
-                        <td className="py-3 px-4">
-                          <p className="font-bold text-gray-900">{m.displayName}</p>
-                          <p className="text-[10px] text-gray-500">{m.email || m.userId}</p>
-                        </td>
-                        <td className="py-3 px-4">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                            m.role === 'admin' ? 'bg-[#7856FF]/15 text-[#7856FF] border border-[#7856FF]/30' : 'bg-gray-100 text-gray-600'
-                          }`}>
-                            {m.role}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                            m.status === 'active' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-amber-50 text-amber-700 border border-amber-200'
-                          }`}>
-                            {m.status}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4">
-                          {m.hasReceivedPayout ? (
-                            <span className="text-gray-400 font-medium">Won (Ineligible)</span>
-                          ) : m.eligibleForDraw ? (
-                            <span className="text-green-600 font-bold">Eligible</span>
-                          ) : (
-                            <span className="text-amber-600">Pending Payment</span>
-                          )}
-                        </td>
-                        <td className="py-3 px-4 font-mono font-bold text-gray-800">
-                          {(m.totalContributed || 0).toLocaleString()} ETB
-                        </td>
-                        <td className="py-3 px-4 text-right">
-                          {m.status === 'pending' && canManageCurrentEkub ? (
+                    {members.map((m) => {
+                      const userDoc = rawPlatformUsers.find(u => u.uid === m.userId);
+                      const evalStatus = selectedEkub ? evaluateMemberContribution(selectedEkub, m, contributions, userDoc) : null;
+                      const isOverdue = evalStatus?.isOverdue || m.contributionStatus === 'overdue';
+
+                      return (
+                        <tr 
+                          key={m.userId} 
+                          className={`transition-colors ${
+                            isOverdue 
+                              ? 'bg-red-50/70 hover:bg-red-100/50 border-l-4 border-l-red-600' 
+                              : evalStatus?.isDueSoon 
+                              ? 'bg-amber-50/30 hover:bg-amber-50/70 border-l-4 border-l-amber-500' 
+                              : 'hover:bg-gray-50'
+                          }`}
+                        >
+                          <td className="py-3 px-4">
+                            <p className={`font-bold ${isOverdue ? 'text-red-950 font-black' : 'text-gray-900'}`}>{m.displayName}</p>
+                            <p className="text-[10px] text-gray-500">{m.email || m.userId}</p>
+                            {evalStatus?.phoneNumber && (
+                              <p className="text-[10px] text-gray-400 font-mono flex items-center gap-1 mt-0.5">
+                                <Phone className="w-2.5 h-2.5" />
+                                <span>{evalStatus.phoneNumber}</span>
+                              </p>
+                            )}
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                              m.role === 'admin' ? 'bg-[#7856FF]/15 text-[#7856FF] border border-[#7856FF]/30' : 'bg-gray-100 text-gray-600'
+                            }`}>
+                              {m.role}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                              m.status === 'active' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-amber-50 text-amber-700 border border-amber-200'
+                            }`}>
+                              {m.status}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            {isOverdue ? (
+                              <div>
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-red-600 text-white font-black uppercase text-[10px] tracking-wider shadow-xs animate-pulse">
+                                  <AlertTriangle className="w-3 h-3" />
+                                  OVERDUE
+                                </span>
+                                <p className="text-[10px] text-red-700 font-bold mt-0.5">
+                                  {evalStatus?.dueDate} ({evalStatus?.daysOverdue || 1}d late)
+                                </p>
+                              </div>
+                            ) : evalStatus?.isDueSoon ? (
+                              <div>
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300 font-bold uppercase text-[10px] tracking-wider">
+                                  <Clock className="w-3 h-3 text-amber-600" />
+                                  DUE SOON
+                                </span>
+                                <p className="text-[10px] text-amber-700 mt-0.5">
+                                  {evalStatus.dueDate} ({evalStatus.daysRemaining}d left)
+                                </p>
+                              </div>
+                            ) : evalStatus?.status === 'paid' ? (
+                              <div>
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-green-50 text-green-700 border border-green-200 font-bold uppercase text-[10px] tracking-wider">
+                                  <CheckCircle2 className="w-3 h-3 text-green-600" />
+                                  PAID
+                                </span>
+                              </div>
+                            ) : (
+                              <div>
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 font-bold uppercase text-[10px] tracking-wider">
+                                  UPCOMING
+                                </span>
+                                {evalStatus?.dueDate && (
+                                  <p className="text-[10px] text-gray-500 mt-0.5">
+                                    {evalStatus.dueDate}
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-3 px-4">
+                            {m.hasReceivedPayout ? (
+                              <span className="text-gray-400 font-medium">Won (Ineligible)</span>
+                            ) : isOverdue ? (
+                              <span className="text-red-700 font-bold">Suspended (Overdue)</span>
+                            ) : m.eligibleForDraw ? (
+                              <span className="text-green-600 font-bold">Eligible</span>
+                            ) : (
+                              <span className="text-amber-600">Pending Payment</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 font-mono font-bold text-gray-800">
+                            {(m.totalContributed || 0).toLocaleString()} ETB
+                          </td>
+                          <td className="py-3 px-4 text-right">
                             <div className="flex items-center justify-end gap-1.5">
-                              <button
-                                onClick={() => handleApproveMember(m.userId)}
-                                disabled={processingId === m.userId}
-                                className="px-2.5 py-1 bg-green-600 hover:bg-green-700 text-white font-bold rounded text-[10px] uppercase tracking-wider transition-colors disabled:opacity-50"
-                              >
-                                Approve
-                              </button>
-                              <button
-                                onClick={() => setMemberToRemove(m)}
-                                disabled={processingId === m.userId}
-                                className="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-bold rounded text-[10px] uppercase tracking-wider transition-colors disabled:opacity-50"
-                              >
-                                Reject
-                              </button>
+                              {!isSuperAdmin && evalStatus && (
+                                <button
+                                  onClick={() => {
+                                    setSmsModalTarget(evalStatus);
+                                    setSmsModalType(isOverdue ? 'overdue_alert' : evalStatus.isDueSoon ? '3_day_reminder' : 'manual_reminder');
+                                  }}
+                                  title="Send direct SMS notification to member"
+                                  className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider rounded transition-colors flex items-center space-x-1 ${
+                                    isOverdue 
+                                      ? 'bg-red-600 hover:bg-red-700 text-white shadow-xs' 
+                                      : 'bg-purple-50 hover:bg-purple-100 text-[#7856FF] border border-purple-200'
+                                  }`}
+                                >
+                                  <MessageSquare className="w-3 h-3" />
+                                  <span>{isOverdue ? 'SMS Alert' : 'SMS'}</span>
+                                </button>
+                              )}
+
+                              {m.status === 'pending' && canManageCurrentEkub ? (
+                                <>
+                                  <button
+                                    onClick={() => handleApproveMember(m.userId)}
+                                    disabled={processingId === m.userId}
+                                    className="px-2.5 py-1 bg-green-600 hover:bg-green-700 text-white font-bold rounded text-[10px] uppercase tracking-wider transition-colors disabled:opacity-50"
+                                  >
+                                    Approve
+                                  </button>
+                                  <button
+                                    onClick={() => setMemberToRemove(m)}
+                                    disabled={processingId === m.userId}
+                                    className="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-bold rounded text-[10px] uppercase tracking-wider transition-colors disabled:opacity-50"
+                                  >
+                                    Reject
+                                  </button>
+                                </>
+                              ) : canManageCurrentEkub && m.role !== 'admin' ? (
+                                <button
+                                  onClick={() => setMemberToRemove(m)}
+                                  disabled={processingId === m.userId}
+                                  className="text-red-500 hover:text-red-700 text-[11px] font-bold uppercase tracking-wider hover:underline"
+                                >
+                                  Remove
+                                </button>
+                              ) : null}
                             </div>
-                          ) : canManageCurrentEkub && m.role !== 'admin' ? (
-                            <button
-                              onClick={() => setMemberToRemove(m)}
-                              disabled={processingId === m.userId}
-                              className="text-red-500 hover:text-red-700 text-[11px] font-bold uppercase tracking-wider hover:underline"
-                            >
-                              Remove
-                            </button>
-                          ) : (
-                            <span className="text-gray-400 text-[10px]">--</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1168,17 +1747,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </div>
                 </div>
 
-                <button
-                  onClick={() => onOpenLiveDraw(e)}
-                  className="w-full py-2.5 bg-[#7856FF] hover:bg-[#6340FF] text-white font-bold text-xs uppercase tracking-wider shadow-sm transition-colors flex items-center justify-center space-x-1.5 rounded-lg"
-                >
-                  <Sparkles className="w-4 h-4" />
-                  {/* The modal this opens already enforces who can actually
-                      start the draw (only that Ekub's assigned Admin) --
-                      this label just avoids implying the Super Admin can
-                      launch it themselves. */}
-                  <span>{e.adminId === userProfile?.uid ? 'Launch Live Draw' : 'View Live Draw'}</span>
-                </button>
+                {/* Super Admin can only view the list of circles and members, and does not have access to or view live draws.
+                    Ekub Admin is the only role that can launch and manage a draw for their circle. */}
+                {!isSuperAdmin && e.adminId === userProfile?.uid && (
+                  <button
+                    onClick={() => onOpenLiveDraw(e)}
+                    className="w-full py-2.5 bg-[#7856FF] hover:bg-[#6340FF] text-white font-bold text-xs uppercase tracking-wider shadow-sm transition-colors flex items-center justify-center space-x-1.5 rounded-lg"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    <span>Launch Live Draw</span>
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -1301,98 +1880,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       )}
 
-      {/* SAMPLE DATA GENERATION MODAL (SUPER ADMIN ONLY) */}
-      {showSeedConfirmModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white max-w-lg w-full p-6 sm:p-7 rounded-2xl border border-[#E6E1F5] shadow-2xl space-y-5 text-gray-900 animate-in fade-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-start">
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 rounded-xl bg-[#7856FF]/10 text-[#7856FF] flex items-center justify-center">
-                  <Sparkles className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-[#1C1132]">Clean Up Old Sample Data</h3>
-                  <p className="text-xs text-gray-500">One-time removal from Firestore &amp; Authentication</p>
-                </div>
-              </div>
-              <button 
-                onClick={() => !seedingData && setShowSeedConfirmModal(false)} 
-                disabled={seedingData}
-                className="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-30"
-              >
-                <XCircle className="w-5 h-5" />
-              </button>
-            </div>
-
-            <p className="text-xs text-gray-600 leading-relaxed">
-              Sample circle browsing is now handled entirely by <strong>Demo Mode</strong> (available
-              right from the landing page), which never touches Firebase at all. This button removes
-              whatever the old "Generate Sample Data" feature already wrote for real:
-            </p>
-
-            <div className="space-y-2.5">
-              <div className="p-3 bg-[#F8F7FC] border border-[#E6E1F5] rounded-xl text-xs space-y-1">
-                <div className="flex justify-between font-bold text-gray-900">
-                  <span>1. Bole Daily Savers</span>
-                  <span className="text-[#7856FF] uppercase text-[10px]">Ekub + Members</span>
-                </div>
-                <p className="text-gray-500 text-[11px]">Plus Admin account: Abebe Bekele (<code>admin.bole.daily@yegnaekub-demo.et</code>)</p>
-              </div>
-
-              <div className="p-3 bg-[#F8F7FC] border border-[#E6E1F5] rounded-xl text-xs space-y-1">
-                <div className="flex justify-between font-bold text-gray-900">
-                  <span>2. Merkato Weekly Circle</span>
-                  <span className="text-[#7856FF] uppercase text-[10px]">Ekub + Members</span>
-                </div>
-                <p className="text-gray-500 text-[11px]">Plus Admin account: Selamawit Tesfaye (<code>admin.merkato.weekly@yegnaekub-demo.et</code>)</p>
-              </div>
-
-              <div className="p-3 bg-[#F8F7FC] border border-[#E6E1F5] rounded-xl text-xs space-y-1">
-                <div className="flex justify-between font-bold text-gray-900">
-                  <span>3. Piazza Monthly Cooperative</span>
-                  <span className="text-[#7856FF] uppercase text-[10px]">Ekub + Members</span>
-                </div>
-                <p className="text-gray-500 text-[11px]">Plus Admin account: Dawit Alemu (<code>admin.piazza.monthly@yegnaekub-demo.et</code>)</p>
-              </div>
-            </div>
-
-            <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-[11px] text-red-900 flex items-start space-x-2">
-              <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
-              <span>This permanently deletes these Ekubs, their members, and both Admin accounts (Auth and any leftover profile documents, including orphaned duplicates from earlier testing). This cannot be undone.</span>
-            </div>
-
-            <div className="flex gap-2 pt-2">
-              <button
-                type="button"
-                disabled={seedingData}
-                onClick={() => setShowSeedConfirmModal(false)}
-                className="flex-1 py-2.5 text-xs font-bold uppercase tracking-wider text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={seedingData}
-                onClick={handleExecuteSeedSampleData}
-                className="flex-1 py-2.5 text-xs font-bold uppercase tracking-wider text-white bg-red-600 hover:bg-red-700 rounded-xl shadow-md transition-all flex items-center justify-center space-x-2 disabled:opacity-50"
-              >
-                {seedingData ? (
-                  <>
-                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent animate-spin rounded-full" />
-                    <span>Cleaning Up...</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-4 h-4" />
-                    <span>Confirm &amp; Delete</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* REMOVE / REJECT MEMBER CONFIRMATION MODAL */}
       {memberToRemove && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -1425,6 +1912,158 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 className="flex-1 py-2 text-xs font-bold uppercase tracking-wider text-white bg-red-600 hover:bg-red-700 rounded-lg shadow-sm transition-colors disabled:opacity-50"
               >
                 {processingId === memberToRemove.userId ? 'Removing...' : 'Confirm Remove'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SMS DISPATCH & PREVIEW MODAL (Ekub Admin only) */}
+      {!isSuperAdmin && smsModalTarget && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white max-w-lg w-full p-6 rounded-2xl border border-[#E6E1F5] shadow-2xl space-y-4 text-gray-900 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-start">
+              <div className="flex items-center space-x-3">
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                  smsModalType === 'overdue_alert' 
+                    ? 'bg-red-100 text-red-600' 
+                    : 'bg-[#7856FF]/10 text-[#7856FF]'
+                }`}>
+                  <MessageSquare className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-[#1C1132]">
+                    {smsModalType === 'overdue_alert'
+                      ? 'Dispatch Overdue SMS Alert'
+                      : smsModalType === '3_day_reminder'
+                      ? 'Dispatch 3-Day SMS Due Reminder'
+                      : 'Dispatch Member SMS Notice'}
+                  </h3>
+                  <p className="text-xs text-gray-500">
+                    Direct SMS delivery to member's registered mobile number
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => !smsDispatching && setSmsModalTarget(null)} 
+                disabled={smsDispatching}
+                className="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-30"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Recipient Details */}
+            <div className="p-3 bg-[#F8F7FC] border border-[#E6E1F5] rounded-xl text-xs space-y-1.5">
+              <div className="flex justify-between">
+                <span className="text-gray-500">Recipient:</span>
+                <span className="font-bold text-gray-900">{smsModalTarget.displayName}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Phone Number:</span>
+                <span className="font-mono font-bold text-[#7856FF]">{smsModalTarget.phoneNumber || 'No phone on file'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Ekub &amp; Cycle:</span>
+                <span className="font-bold text-gray-800">{smsModalTarget.ekubName} (Cycle #{smsModalTarget.cycleNumber})</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Amount Due:</span>
+                <span className="font-bold text-gray-900">{smsModalTarget.contributionAmount.toLocaleString()} ETB</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Due Date:</span>
+                <span className={`font-bold ${smsModalTarget.isOverdue ? 'text-red-600' : 'text-gray-900'}`}>
+                  {smsModalTarget.dueDate} {smsModalTarget.isOverdue && `(${smsModalTarget.daysOverdue} days overdue)`}
+                </span>
+              </div>
+            </div>
+
+            {/* Template Selector */}
+            <div className="space-y-1.5">
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-700">
+                Notification Template
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSmsModalType('3_day_reminder')}
+                  className={`py-2 px-3 text-xs font-bold rounded-lg border transition-all ${
+                    smsModalType === '3_day_reminder'
+                      ? 'bg-[#7856FF] text-white border-[#7856FF] shadow-xs'
+                      : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                  }`}
+                >
+                  ⏰ 3-Day Due Notice
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSmsModalType('overdue_alert')}
+                  className={`py-2 px-3 text-xs font-bold rounded-lg border transition-all ${
+                    smsModalType === 'overdue_alert'
+                      ? 'bg-red-600 text-white border-red-600 shadow-xs'
+                      : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                  }`}
+                >
+                  ⚠️ Overdue Urgent Alert
+                </button>
+              </div>
+            </div>
+
+            {/* Live SMS Preview Box */}
+            <div className="space-y-1.5">
+              <div className="flex justify-between items-center">
+                <label className="text-[11px] font-bold uppercase tracking-wider text-gray-700 flex items-center gap-1">
+                  <Smartphone className="w-3.5 h-3.5 text-[#7856FF]" />
+                  <span>SMS Payload Preview</span>
+                </label>
+                <span className="text-[10px] text-gray-400 font-mono">Ethio Telecom SMS Gateway</span>
+              </div>
+              <div className="p-3.5 bg-gray-950 text-green-400 font-mono text-xs rounded-xl border border-gray-800 space-y-2 leading-relaxed shadow-inner">
+                <p className="text-gray-300">
+                  {smsModalType === 'overdue_alert' ? (
+                    `[YEGNA EKUB ALERT] Dear ${smsModalTarget.displayName}, your contribution of ${smsModalTarget.contributionAmount.toLocaleString()} ETB for "${smsModalTarget.ekubName}" was due on ${smsModalTarget.dueDate} and is now OVERDUE. Please transfer via Telebirr/CBE and upload your receipt immediately to maintain draw eligibility.`
+                  ) : (
+                    `[YEGNA EKUB REMINDER] Dear ${smsModalTarget.displayName}, this is a reminder that your contribution of ${smsModalTarget.contributionAmount.toLocaleString()} ETB for "${smsModalTarget.ekubName}" is due on ${smsModalTarget.dueDate} (in 3 days). Please submit your payment receipt in the app.`
+                  )}
+                </p>
+                <div className="pt-2 border-t border-gray-800 text-[10px] text-gray-400">
+                  <span>Sender ID: <strong>YEGNAEKUB</strong> • Delivery: Instant SMS</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                disabled={smsDispatching}
+                onClick={() => setSmsModalTarget(null)}
+                className="flex-1 py-2.5 text-xs font-bold uppercase tracking-wider text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={smsDispatching || !smsModalTarget.phoneNumber}
+                onClick={handleSendSingleSms}
+                className={`flex-1 py-2.5 text-xs font-bold uppercase tracking-wider text-white rounded-xl shadow-md transition-all flex items-center justify-center space-x-2 disabled:opacity-50 ${
+                  smsModalType === 'overdue_alert'
+                    ? 'bg-red-600 hover:bg-red-700'
+                    : 'bg-[#7856FF] hover:bg-[#6340FF]'
+                }`}
+              >
+                {smsDispatching ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent animate-spin rounded-full" />
+                    <span>Dispatching SMS...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Transmit SMS</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

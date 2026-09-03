@@ -18,20 +18,22 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../firebase/AuthContext';
 import { useTranslation } from '../locales/TranslationContext';
-import { Ekub, Contribution, Draw, Payout } from '../types';
+import { Ekub, Contribution, Draw, Payout, UserProfile } from '../types';
 
 interface DashboardProps {
   ekubs: Ekub[];
   contributions: Contribution[];
   draws: Draw[];
   payouts: Payout[];
+  userProfile?: UserProfile | null;
+  isAdmin?: boolean;
+  isSuperAdmin?: boolean;
   onSelectEkub: (ekub: Ekub) => void;
   onOpenContribute: (ekub?: Ekub) => void;
   onOpenLiveDraw: (ekub?: Ekub) => void;
   onOpenVerifyDraw: (draw?: Draw) => void;
   onOpenPayout: (payout?: Payout) => void;
   onOpenCreateEkub: () => void;
-  onOpenJoinEkub: () => void;
   onNavigateTab: (tab: string) => void;
 }
 
@@ -40,22 +42,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
   contributions,
   draws,
   payouts,
+  userProfile: propUserProfile,
+  isAdmin: propIsAdmin,
+  isSuperAdmin: propIsSuperAdmin,
   onSelectEkub,
   onOpenContribute,
   onOpenLiveDraw,
   onOpenVerifyDraw,
   onOpenPayout,
   onOpenCreateEkub,
-  onOpenJoinEkub,
   onNavigateTab,
 }) => {
-  const { userProfile, isAdmin } = useAuth();
+  const auth = useAuth();
+  const userProfile = propUserProfile !== undefined ? propUserProfile : auth.userProfile;
+  const isAdmin = propIsSuperAdmin !== undefined ? propIsSuperAdmin : (propIsAdmin !== undefined ? propIsAdmin : auth.isAdmin);
 
-  // Three real roles, not two: isAdmin (from useAuth) reflects Super Admin
-  // status ONLY. A person can also be the assigned admin of a specific
-  // Ekub without being Super Admin -- that's a distinct, real role ("Ekub
-  // Admin") that deserves its own label and its own Quick Action, rather
-  // than being lumped in with plain members.
+  // Three real roles, not two: isAdmin reflects Super Admin status ONLY.
+  // A person can also be the assigned admin of a specific Ekub without
+  // being Super Admin -- that's a distinct, real role ("Ekub Admin").
   const isEkubAdminOfAny = Boolean(userProfile?.uid && ekubs.some(e => e.adminId === userProfile.uid));
   const { t, language } = useTranslation();
 
@@ -157,7 +161,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   className="px-4 py-2.5 bg-white/10 hover:bg-white/15 text-[#C4B5FD] border border-[#7856FF]/40 font-bold text-xs uppercase tracking-widest transition-all flex items-center space-x-1.5 rounded-lg"
                 >
                   <Sparkles className="w-4 h-4 text-[#7856FF]" />
-                  <span>{t.joinDraw}</span>
+                  <span>{activeEkub?.adminId === userProfile?.uid ? 'Launch Live Draw' : 'Watch Live Draw'}</span>
                 </button>
               </>
             )}
@@ -181,13 +185,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <span className="text-[9px] bg-[#7856FF] px-1.5 py-0.5 rounded text-white font-bold uppercase">Ekub Admin</span>
               </button>
             ) : (
-              <button
-                onClick={onOpenJoinEkub}
-                className="px-3.5 py-2.5 bg-transparent hover:bg-white/10 text-white font-bold text-xs uppercase tracking-widest border border-white/20 transition-all flex items-center space-x-1.5 rounded-lg"
-              >
-                <Coins className="w-3.5 h-3.5 text-[#C4B5FD]" />
-                <span>{t.joinEkub}</span>
-              </button>
+              <div className="px-3.5 py-2.5 bg-white/5 border border-white/15 text-[#C4B5FD] text-[11px] font-semibold flex items-center space-x-1.5 rounded-lg">
+                <ShieldCheck className="w-3.5 h-3.5 text-[#7856FF]" />
+                <span>{language === 'am' ? 'በአስተዳዳሪ ግብዣ ብቻ' : 'Invited Member Access'}</span>
+              </div>
             )}
           </div>
         </div>
@@ -289,13 +290,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <span>Manage My Ekub (Ekub Admin)</span>
                 </button>
               ) : (
-                <button
-                  onClick={onOpenJoinEkub}
-                  className="w-full py-3 bg-white/10 border border-white/20 text-xs font-bold uppercase tracking-widest hover:bg-white/15 transition-colors rounded-lg flex items-center justify-center space-x-1.5"
-                >
-                  <Coins className="w-3.5 h-3.5 text-[#C4B5FD]" />
-                  <span>{t.joinEkub}</span>
-                </button>
+                <div className="p-3 bg-white/5 border border-white/10 rounded-lg text-left">
+                  <div className="flex items-center space-x-1.5 text-[#C4B5FD] text-xs font-bold mb-1">
+                    <ShieldCheck className="w-3.5 h-3.5 text-[#7856FF]" />
+                    <span>{language === 'am' ? 'የአባልነት መመሪያ' : 'Invitation-Only'}</span>
+                  </div>
+                  <p className="text-[10px] text-white/70 leading-relaxed">
+                    {language === 'am'
+                      ? 'አባላት በዕቁብ አስተዳዳሪ ግብዣ ብቻ ይቀላቀላሉ። አስተዳዳሪው ስልክዎን ሲያክል እዚህ ይታያል።'
+                      : 'Members are added by group admin invitation. Circles will appear here once you are invited.'}
+                  </p>
+                </div>
               )}
             </div>
 

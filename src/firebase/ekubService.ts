@@ -113,6 +113,9 @@ export const submitContribution = async (data: {
   transactionReference?: string;
   [key: string]: any;
 }): Promise<{ id: string }> => {
+  if (isDemoModeActive()) {
+    return { id: `demo-contrib-${Date.now()}` };
+  }
   assertNotDemoMode();
   if (!isFirebaseAvailable()) throw new Error('Firebase is not available');
   const contribId = `contrib-${Date.now()}-${Math.random().toString(36).substring(7)}`;
@@ -143,9 +146,12 @@ export const verifyPayment = async (
   ekubId: string, 
   contributionId: string, 
   adminId?: string, 
-  adminName?: string,
+  adminName?: string, 
   notes?: string
 ): Promise<{ success: boolean }> => {
+  if (isDemoModeActive()) {
+    return { success: true };
+  }
   assertNotDemoMode();
   const fn = httpsCallable(functions, 'verifyContribution');
   const res = await fn({ ekubId, contributionId, notes: notes || `Verified by ${adminName || 'Admin'}` });
@@ -159,6 +165,9 @@ export const rejectPayment = async (
   adminName?: string, 
   reason?: string
 ): Promise<{ success: boolean }> => {
+  if (isDemoModeActive()) {
+    return { success: true };
+  }
   assertNotDemoMode();
   const fn = httpsCallable(functions, 'rejectContribution');
   const res = await fn({ ekubId, contributionId, reason: reason || 'Invalid payment receipt or reference' });
@@ -171,6 +180,49 @@ export const executeDraw = async (
   adminId?: string,
   adminName?: string
 ): Promise<{ draw: Draw; winner?: any; proof?: any }> => {
+  if (isDemoModeActive()) {
+    const ekubId = typeof ekubIdOrPayload === 'string' ? ekubIdOrPayload : ekubIdOrPayload.ekubId;
+    const cycleNum = typeof ekubIdOrPayload === 'string' ? (cycleNumber || 1) : (ekubIdOrPayload.cycleNumber || 1);
+    const members = DEMO_MEMBERS[ekubId] || [];
+    const eligible = members.filter(m => !m.hasReceivedPayout && (m.eligibleForDraw || m.contributionStatus === 'paid'));
+    const pool = eligible.length > 0 ? eligible : members.filter(m => !m.hasReceivedPayout);
+    const winnerMember = pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : members[0];
+    const ekub = DEMO_EKUBS.find(e => e.id === ekubId) || DEMO_EKUBS[0];
+    const fakeHash = `0x${Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('')}`;
+    const newDraw: Draw = {
+      id: `demo-draw-${ekubId}-${cycleNum}-${Date.now()}`,
+      ekubId,
+      ekubName: ekub.name,
+      cycleId: `cycle-${cycleNum}`,
+      cycleNumber: cycleNum,
+      drawNumber: cycleNum,
+      winnerId: winnerMember?.userId || 'demo-member-1',
+      winnerName: winnerMember?.displayName || 'Demo Winner',
+      payoutAmount: ekub.payoutAmount,
+      eligibleMemberIds: members.map(m => m.userId),
+      eligibleMemberCount: members.length,
+      scheduledAt: new Date().toISOString(),
+      executedAt: new Date().toISOString(),
+      status: 'completed',
+      randomnessMethod: 'HMAC-SHA256 (Provably Fair)',
+      serverSeedHash: fakeHash,
+      clientSeed: 'yegna-provably-fair-entropy',
+      verificationHash: fakeHash,
+      verificationProof: {
+        combinedEntropy: `entropy-${Date.now()}`,
+        hashResult: fakeHash,
+        rawDecimal: '0.482718491028374',
+        winningIndex: Math.floor(Math.random() * Math.max(members.length, 1)),
+        explanation: 'Provably fair winner selection calculated via cryptographic HMAC-SHA256 digest.'
+      },
+      createdAt: new Date().toISOString()
+    };
+    return {
+      draw: newDraw,
+      winner: winnerMember || { displayName: 'Demo Winner', userId: 'demo-1' },
+      proof: newDraw.verificationProof
+    };
+  }
   assertNotDemoMode();
   const fn = httpsCallable(functions, 'executeDraw');
   const payload = typeof ekubIdOrPayload === 'string'
@@ -294,6 +346,16 @@ export const joinEkubWithInviteCode = async (
   displayName: string,
   email?: string
 ): Promise<Ekub> => {
+  if (isDemoModeActive()) {
+    const normalizedCode = inviteCode.trim().toUpperCase();
+    const target = DEMO_EKUBS.find(e => 
+      (e.inviteCode && e.inviteCode.toUpperCase() === normalizedCode) || 
+      (e.id && e.id.toUpperCase() === normalizedCode) ||
+      (e.name && e.name.toUpperCase().includes(normalizedCode)) ||
+      (e.id.toLowerCase().includes(inviteCode.trim().toLowerCase()))
+    ) || DEMO_EKUBS[0];
+    return target;
+  }
   assertNotDemoMode();
   if (!isFirebaseAvailable()) throw new Error('Firebase is not available');
   const ekubs = await getEkubs();

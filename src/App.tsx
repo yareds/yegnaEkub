@@ -18,7 +18,6 @@ import { LiveDrawModal } from './components/LiveDrawModal';
 import { VerifyDrawModal } from './components/VerifyDrawModal';
 import { PayoutWorkflowModal } from './components/PayoutWorkflowModal';
 import { CreateEkubModal } from './components/CreateEkubModal';
-import { JoinEkubModal } from './components/JoinEkubModal';
 import { LegalModal } from './components/LegalModal';
 import { NotificationsModal } from './components/NotificationsModal';
 import {
@@ -38,23 +37,59 @@ import { setDemoModeActive } from './firebase/ekubService';
 import { DEMO_EKUBS, DEMO_MEMBERS, DEMO_CONTRIBUTIONS, DEMO_DRAWS, DEMO_PAYOUTS, DEMO_NOTIFICATIONS } from './data/demoData';
 
 // Demo Mode identities -- these UIDs are deliberately the same ones already
-// used throughout data/demoData.ts (e.g. DEMO_EKUBS[0].adminId), so that
-// role-based scoping (myEkubs, isEkubAdminOfAny, etc.) works correctly
-// against the demo dataset without any special-casing.
-const DEMO_PROFILES: Record<'super_admin' | 'ekub_admin' | 'member', UserProfile> = {
+// Role-specific demo profiles for the zero-config offline demonstration.
+// UIDs are aligned with the sample datasets in data/demoData.ts.
+// Rahel Getachew can belong to TWO different Ekub circles (Merkato and Piazza),
+// but under separate, strictly isolated logins as required!
+export type DemoRoleId = 
+  | 'super_admin' 
+  | 'ekub_admin' 
+  | 'ekub_admin_merkato' 
+  | 'ekub_admin_piazza' 
+  | 'member' 
+  | 'member_merkato' 
+  | 'member_piazza';
+
+const DEMO_PROFILES: Record<string, UserProfile> = {
   super_admin: {
     uid: 'demo-super-admin', fullName: 'Demo Super Admin', email: 'super-admin@yegnaekub-demo.et',
-    phoneNumber: '', photoURL: '', role: 'super_admin', preferredLanguage: 'en',
+    phoneNumber: '+251 91 100 0000', photoURL: '', role: 'super_admin', preferredLanguage: 'en',
     verificationStatus: 'verified', createdAt: new Date().toISOString(),
   } as UserProfile,
   ekub_admin: {
     uid: 'demo-admin-merkato', fullName: 'Selamawit Tesfaye', email: 'admin.merkato.weekly@yegnaekub-demo.et',
-    phoneNumber: '', photoURL: '', role: 'member', preferredLanguage: 'en',
+    phoneNumber: '+251 91 100 0001', photoURL: '', role: 'member', preferredLanguage: 'en',
+    ekubId: 'demo-ekub-merkato-weekly', ekubName: 'Merkato Weekly Circle',
+    verificationStatus: 'verified', createdAt: new Date().toISOString(),
+  } as UserProfile,
+  ekub_admin_merkato: {
+    uid: 'demo-admin-merkato', fullName: 'Selamawit Tesfaye', email: 'admin.merkato.weekly@yegnaekub-demo.et',
+    phoneNumber: '+251 91 100 0001', photoURL: '', role: 'member', preferredLanguage: 'en',
+    ekubId: 'demo-ekub-merkato-weekly', ekubName: 'Merkato Weekly Circle',
+    verificationStatus: 'verified', createdAt: new Date().toISOString(),
+  } as UserProfile,
+  ekub_admin_piazza: {
+    uid: 'demo-admin-piazza', fullName: 'Dawit Alemu', email: 'admin.piazza.monthly@yegnaekub-demo.et',
+    phoneNumber: '+251 91 100 0005', photoURL: '', role: 'member', preferredLanguage: 'en',
+    ekubId: 'demo-ekub-piazza-monthly', ekubName: 'Piazza Monthly Cooperative',
     verificationStatus: 'verified', createdAt: new Date().toISOString(),
   } as UserProfile,
   member: {
-    uid: 'demo-merkato-member-0', fullName: 'Rahel Getachew', email: 'rahel.getachew@example.et',
-    phoneNumber: '', photoURL: '', role: 'member', preferredLanguage: 'en',
+    uid: 'demo-rahel-merkato', fullName: 'Rahel Getachew', email: 'rahel.merkato@example.et',
+    phoneNumber: '+251 91 100 0002', photoURL: '', role: 'member', preferredLanguage: 'en',
+    ekubId: 'demo-ekub-merkato-weekly', ekubName: 'Merkato Weekly Circle',
+    verificationStatus: 'verified', createdAt: new Date().toISOString(),
+  } as UserProfile,
+  member_merkato: {
+    uid: 'demo-rahel-merkato', fullName: 'Rahel Getachew', email: 'rahel.merkato@example.et',
+    phoneNumber: '+251 91 100 0002', photoURL: '', role: 'member', preferredLanguage: 'en',
+    ekubId: 'demo-ekub-merkato-weekly', ekubName: 'Merkato Weekly Circle',
+    verificationStatus: 'verified', createdAt: new Date().toISOString(),
+  } as UserProfile,
+  member_piazza: {
+    uid: 'demo-rahel-piazza', fullName: 'Rahel Getachew', email: 'rahel.piazza@example.et',
+    phoneNumber: '+251 91 100 0002', photoURL: '', role: 'member', preferredLanguage: 'en',
+    ekubId: 'demo-ekub-piazza-monthly', ekubName: 'Piazza Monthly Cooperative',
     verificationStatus: 'verified', createdAt: new Date().toISOString(),
   } as UserProfile,
 };
@@ -70,8 +105,8 @@ function MainAppContent() {
   const [demoMode, setDemoMode] = useState<boolean>(() => {
     try { return localStorage.getItem('yegnaekub_demo_mode') === 'true'; } catch { return false; }
   });
-  const [demoRole, setDemoRole] = useState<'super_admin' | 'ekub_admin' | 'member'>(() => {
-    try { return (localStorage.getItem('yegnaekub_demo_role') as any) || 'super_admin'; } catch { return 'super_admin'; }
+  const [demoRole, setDemoRole] = useState<string>(() => {
+    try { return (localStorage.getItem('yegnaekub_demo_role') as string) || 'member_merkato'; } catch { return 'member_merkato'; }
   });
 
   useEffect(() => {
@@ -89,10 +124,10 @@ function MainAppContent() {
   // myEkubs, hasAdminAccess, etc.) already derives from these, so overriding
   // them here is enough to make the entire rest of the component tree work
   // correctly in Demo Mode without touching any of it individually.
-  const userProfile = demoMode ? DEMO_PROFILES[demoRole] : realUserProfile;
+  const userProfile = demoMode ? (DEMO_PROFILES[demoRole] || DEMO_PROFILES.member_merkato) : realUserProfile;
   const isSuperAdmin = demoMode ? demoRole === 'super_admin' : realIsSuperAdmin;
   const isAdmin = demoMode ? demoRole === 'super_admin' : realIsAdmin;
-  const user = demoMode ? ({ uid: userProfile.uid } as any) : realUser;
+  const user = demoMode ? ({ uid: userProfile.uid, email: userProfile.email } as any) : realUser;
 
   // Navigation State
   const [activeTab, setActiveTab] = useState<string>('dashboard');
@@ -112,17 +147,30 @@ function MainAppContent() {
   // Role verification: is the user a Super Admin or the designated admin of at least one Ekub?
   const isEkubAdminOfAny = Boolean(userProfile?.uid && ekubs.some(e => e.adminId === userProfile.uid));
 
-  // Circles this specific user actually belongs to -- as the assigned
-  // admin, or as an active member (via myMemberEkubIds, computed in
-  // refreshAllData). Super Admin sees every circle regardless, matching
-  // their platform-wide oversight role. This is what member-facing views
-  // (Dashboard, Draws, Contributions) should render, NOT the raw `ekubs`
-  // list -- otherwise a member or Ekub Admin sees every circle on the
-  // platform instead of just their own.
+  // Strict Per-Ekub Isolation:
+  // When logged into a specific Ekub account, the user sees ONLY everything
+  // related to that specific Ekub circle, including draws, contributions, and live draws.
   const myEkubs = isSuperAdmin
     ? ekubs
-    : ekubs.filter(e => e.adminId === userProfile?.uid || myMemberEkubIds.includes(e.id));
+    : ekubs.filter(e => {
+        if (userProfile?.ekubId) {
+          return e.id === userProfile.ekubId;
+        }
+        return e.adminId === userProfile?.uid || myMemberEkubIds.includes(e.id);
+      });
   const hasAdminAccess = isSuperAdmin || isEkubAdminOfAny;
+
+  // Scoped datasets: ensure non-super-admin users only ever receive records for their own circle
+  const myEkubIds = myEkubs.map(e => e.id);
+  const scopedContributions = isSuperAdmin
+    ? contributions
+    : contributions.filter(c => myEkubIds.includes(c.ekubId));
+  const scopedDraws = isSuperAdmin
+    ? draws
+    : draws.filter(d => myEkubIds.includes(d.ekubId));
+  const scopedPayouts = isSuperAdmin
+    ? payouts
+    : payouts.filter(p => myEkubIds.includes(p.ekubId));
 
   // Modals
   const [contributeEkub, setContributeEkub] = useState<Ekub | null>(null);
@@ -130,7 +178,6 @@ function MainAppContent() {
   const [verifyDrawTarget, setVerifyDrawTarget] = useState<Draw | null>(null);
   const [payoutClaimTarget, setPayoutClaimTarget] = useState<Payout | null>(null);
   const [showCreateEkub, setShowCreateEkub] = useState(false);
-  const [showJoinEkub, setShowJoinEkub] = useState(false);
   const [showLegal, setShowLegal] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
 
@@ -142,12 +189,12 @@ function MainAppContent() {
   }, [activeTab, dataLoading, hasAdminAccess]);
 
   // The Super Admin is never a member of any Ekub -- they have no
-  // contributions to make, no draws to watch, nothing to "join." Their
-  // workspace is the Admin Center. Redirect them there by default and if
-  // they navigate to member-only views.
+  // personal contributions/draws to participate in. Their primary workspaces
+  // are the Super Admin Overview (dashboard) and Governance Center (admin).
+  // Redirect them if they navigate to member-only views.
   useEffect(() => {
-    if (!dataLoading && isSuperAdmin && ['dashboard', 'discover', 'contributions', 'draws', 'payouts'].includes(activeTab)) {
-      setActiveTab('admin');
+    if (!dataLoading && isSuperAdmin && ['discover', 'contributions', 'draws', 'payouts'].includes(activeTab)) {
+      setActiveTab('dashboard');
     }
   }, [activeTab, dataLoading, isSuperAdmin]);
 
@@ -239,12 +286,15 @@ function MainAppContent() {
     setContributions(DEMO_CONTRIBUTIONS);
     setDraws(DEMO_DRAWS);
     setPayouts(DEMO_PAYOUTS);
-    setNotifications(DEMO_NOTIFICATIONS);
+    const profile = DEMO_PROFILES[demoRole] || DEMO_PROFILES.member_merkato;
+    const uid = profile.uid;
+    setNotifications(DEMO_NOTIFICATIONS.filter(n => n.userId === uid));
     setTickets([]);
-    const uid = DEMO_PROFILES[demoRole].uid;
-    const memberOfEkubIds = Object.entries(DEMO_MEMBERS)
-      .filter(([, members]) => members.some(m => m.userId === uid))
-      .map(([ekubId]) => ekubId);
+    const memberOfEkubIds = profile.ekubId
+      ? [profile.ekubId]
+      : Object.entries(DEMO_MEMBERS)
+          .filter(([, members]) => members.some(m => m.userId === uid))
+          .map(([ekubId]) => ekubId);
     setMyMemberEkubIds(memberOfEkubIds);
     setDataLoading(false);
   }, [demoMode, demoRole]);
@@ -256,6 +306,10 @@ function MainAppContent() {
   };
 
   const handleSelectEkub = (ekub: Ekub) => {
+    // Non-super-admins cannot view details of circles they do not belong to
+    if (!isSuperAdmin && !myEkubs.some(e => e.id === ekub.id)) {
+      return;
+    }
     setSelectedEkub(ekub);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -326,15 +380,26 @@ function MainAppContent() {
               : "You're exploring a live demo with sample data -- nothing here is ever saved."}
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="uppercase tracking-wider opacity-70">{language === 'am' ? 'ሚና ይቀይሩ' : 'Viewing as'}:</span>
+            <span className="uppercase tracking-wider opacity-70">{language === 'am' ? 'የመግቢያ መለያ' : 'Active Account'}:</span>
             <select
               value={demoRole}
-              onChange={(e) => setDemoRole(e.target.value as 'super_admin' | 'ekub_admin' | 'member')}
-              className="px-2 py-1 rounded-md border border-amber-600 bg-white text-amber-950 text-xs font-bold"
+              onChange={(e) => {
+                setDemoRole(e.target.value);
+                setSelectedEkub(null);
+              }}
+              className="px-2.5 py-1 rounded-md border border-amber-600 bg-white text-amber-950 text-xs font-bold shadow-xs cursor-pointer"
             >
-              <option value="super_admin">Super Admin</option>
-              <option value="ekub_admin">Ekub Admin</option>
-              <option value="member">Member</option>
+              <optgroup label="Rahel Getachew (Two Ekubs • Separate Scoped Logins)">
+                <option value="member_merkato">Rahel Getachew — Merkato Circle Account</option>
+                <option value="member_piazza">Rahel Getachew — Piazza Circle Account</option>
+              </optgroup>
+              <optgroup label="Ekub Admins (Managed Circles)">
+                <option value="ekub_admin_merkato">Selamawit Tesfaye — Merkato Admin</option>
+                <option value="ekub_admin_piazza">Dawit Alemu — Piazza Admin</option>
+              </optgroup>
+              <optgroup label="Platform Governance">
+                <option value="super_admin">Super Admin (Platform Oversight)</option>
+              </optgroup>
             </select>
           </span>
           <button
@@ -358,11 +423,13 @@ function MainAppContent() {
         notifications={notifications || []}
         onOpenNotifications={() => setShowNotifications(true)}
         onOpenCreateEkub={() => setShowCreateEkub(true)}
-        onOpenJoinEkub={() => setShowJoinEkub(true)}
         onOpenLegal={() => setShowLegal(true)}
         unreadCount={(notifications || []).filter(n => !n.read).length}
         hasAdminAccess={hasAdminAccess}
         isEkubAdminOfAny={isEkubAdminOfAny}
+        isSuperAdmin={isSuperAdmin}
+        isAdmin={isAdmin}
+        userProfile={userProfile}
       />
 
       {/* Main Content Area */}
@@ -377,10 +444,13 @@ function MainAppContent() {
         ) : selectedEkub ? (
           <EkubDetail
             ekub={selectedEkub}
-            draws={draws}
+            draws={scopedDraws}
+            userProfile={userProfile}
+            isAdmin={isAdmin}
+            isSuperAdmin={isSuperAdmin}
             onBack={() => setSelectedEkub(null)}
-            onOpenContribute={(e) => setContributeEkub(e)}
-            onOpenLiveDraw={(e) => setLiveDrawEkub(e)}
+            onOpenContribute={(e) => setContributeEkub(e || selectedEkub)}
+            onOpenLiveDraw={(e) => setLiveDrawEkub(e || selectedEkub)}
             onOpenVerifyDraw={(d) => setVerifyDrawTarget(d)}
           />
         ) : (
@@ -388,7 +458,6 @@ function MainAppContent() {
             {activeTab === 'landing' && (
               <LandingPage
                 onStartEkub={() => setShowCreateEkub(true)}
-                onJoinEkub={() => setShowJoinEkub(true)}
                 onExploreEkubs={() => handleNavigate('discover')}
                 onOpenLegal={() => setShowLegal(true)}
                 isAdmin={isAdmin}
@@ -400,6 +469,7 @@ function MainAppContent() {
                 <SuperAdminDashboard
                   key={userProfile?.uid}
                   ekubs={ekubs}
+                  userProfile={userProfile}
                   onSelectEkub={handleSelectEkub}
                   onOpenCreateEkub={() => setShowCreateEkub(true)}
                   onNavigateTab={handleNavigate}
@@ -409,16 +479,18 @@ function MainAppContent() {
                 <Dashboard
                   key={userProfile?.uid}
                   ekubs={myEkubs}
-                  contributions={contributions}
-                  draws={draws}
-                  payouts={payouts}
+                  contributions={scopedContributions}
+                  draws={scopedDraws}
+                  payouts={scopedPayouts}
+                  userProfile={userProfile}
+                  isAdmin={isAdmin}
+                  isSuperAdmin={isSuperAdmin}
                   onSelectEkub={handleSelectEkub}
                   onOpenContribute={(e) => setContributeEkub(e || myEkubs[0])}
                   onOpenLiveDraw={(e) => setLiveDrawEkub(e || myEkubs[0])}
-                  onOpenVerifyDraw={(d) => setVerifyDrawTarget(d || draws[0])}
-                  onOpenPayout={(p) => setPayoutClaimTarget(p || payouts[0])}
+                  onOpenVerifyDraw={(d) => setVerifyDrawTarget(d || scopedDraws[0])}
+                  onOpenPayout={(p) => setPayoutClaimTarget(p || scopedPayouts[0])}
                   onOpenCreateEkub={() => setShowCreateEkub(true)}
-                  onOpenJoinEkub={() => setShowJoinEkub(true)}
                   onNavigateTab={handleNavigate}
                 />
               )
@@ -429,30 +501,32 @@ function MainAppContent() {
                 ekubs={ekubs}
                 onSelectEkub={handleSelectEkub}
                 onOpenCreate={() => setShowCreateEkub(true)}
-                onOpenJoin={() => setShowJoinEkub(true)}
               />
             )}
 
             {activeTab === 'contributions' && (
               <ContributionsView
-                contributions={contributions}
+                contributions={scopedContributions}
                 ekubs={myEkubs}
+                userProfile={userProfile}
                 onOpenContribute={(e) => setContributeEkub(e || myEkubs[0])}
               />
             )}
 
             {activeTab === 'draws' && (
               <DrawsView
-                draws={draws}
+                draws={scopedDraws}
                 ekubs={myEkubs}
+                userProfile={userProfile}
                 onOpenLiveDraw={(e) => setLiveDrawEkub(e || myEkubs[0])}
-                onOpenVerifyDraw={(d) => setVerifyDrawTarget(d)}
+                onOpenVerifyDraw={(d) => setVerifyDrawTarget(d || scopedDraws[0])}
               />
             )}
 
             {activeTab === 'payouts' && (
               <PayoutsView
-                payouts={payouts}
+                payouts={scopedPayouts}
+                userProfile={userProfile}
                 onOpenClaim={(p) => setPayoutClaimTarget(p)}
               />
             )}
@@ -469,6 +543,9 @@ function MainAppContent() {
                 onOpenLiveDraw={(e) => setLiveDrawEkub(e)}
                 onOpenVerifyDraw={(d) => setVerifyDrawTarget(d)}
                 onOpenCreateEkub={() => setShowCreateEkub(true)}
+                isSuperAdmin={isSuperAdmin}
+                isAdmin={isAdmin}
+                userProfile={userProfile}
               />
             )}
 
@@ -496,6 +573,8 @@ function MainAppContent() {
       {contributeEkub && (
         <ContributeModal
           ekub={contributeEkub}
+          userProfile={userProfile}
+          isDemoMode={demoMode}
           onClose={() => setContributeEkub(null)}
           onSuccess={refreshAllData}
         />
@@ -504,6 +583,8 @@ function MainAppContent() {
       {liveDrawEkub && (
         <LiveDrawModal
           ekub={liveDrawEkub}
+          userProfile={userProfile}
+          isDemoMode={demoMode}
           onClose={() => setLiveDrawEkub(null)}
           onSuccess={(newDraw) => {
             refreshAllData();
@@ -537,16 +618,6 @@ function MainAppContent() {
           onSuccess={(newEkub) => {
             refreshAllData();
             handleSelectEkub(newEkub);
-          }}
-        />
-      )}
-
-      {showJoinEkub && (
-        <JoinEkubModal
-          onClose={() => setShowJoinEkub(false)}
-          onSuccess={(joinedEkub) => {
-            refreshAllData();
-            handleSelectEkub(joinedEkub);
           }}
         />
       )}

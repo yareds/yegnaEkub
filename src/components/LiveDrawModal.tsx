@@ -15,11 +15,14 @@ import {
 import confetti from 'canvas-confetti';
 import { useAuth } from '../firebase/AuthContext';
 import { useTranslation } from '../locales/TranslationContext';
-import { Ekub, EkubMember, Draw } from '../types';
-import { getEkubMembers, executeDraw } from '../firebase/ekubService';
+import { Ekub, EkubMember, Draw, UserProfile } from '../types';
+import { getEkubMembers, executeDraw, isDemoModeActive } from '../firebase/ekubService';
+import { DEMO_MEMBERS } from '../data/demoData';
 
 interface LiveDrawModalProps {
   ekub: Ekub;
+  userProfile?: UserProfile | null;
+  isDemoMode?: boolean;
   onClose: () => void;
   onSuccess: (newDraw: Draw) => void;
   onOpenVerify: (draw: Draw) => void;
@@ -27,21 +30,27 @@ interface LiveDrawModalProps {
 
 export const LiveDrawModal: React.FC<LiveDrawModalProps> = ({
   ekub,
+  userProfile: propUserProfile,
+  isDemoMode: propIsDemoMode,
   onClose,
   onSuccess,
   onOpenVerify,
 }) => {
-  const { userProfile, isAdmin } = useAuth();
+  const auth = useAuth();
+  const userProfile = propUserProfile !== undefined ? propUserProfile : auth.userProfile;
+  const isDemo = propIsDemoMode ?? isDemoModeActive();
+  const isSuperAdmin = userProfile?.role === 'super_admin' || auth.isSuperAdmin;
   const { t, language } = useTranslation();
 
-  // isAdmin (from useAuth) reflects Super Admin status only -- it does NOT
-  // know about per-Ekub admin assignment. A member should only ever be
-  // able to WATCH a draw; only the specific Ekub Admin assigned to THIS
-  // Ekub should be able to launch it. Note: Super Admin is deliberately
-  // NOT included here -- the Super Admin does not run draws, that is
-  // exclusively the assigned Ekub Admin's job for their own circle.
-  const canExecuteDraw = ekub.adminId === userProfile?.uid;
+  // STRICT ROLE ACCESS RULES:
+  // 1. Ekub Admin: The ONLY role that can launch and manage a draw for their Ekub circle.
+  // 2. Members of this Ekub: Can ONLY watch the live draw for their own circle.
+  // 3. Non-members: Restricted from watching draws of circles they do not belong to.
+  // 4. Super Admin: Oversees circles, does not participate in or view live draws.
+  const isEkubAdmin = Boolean(userProfile?.uid && ekub.adminId === userProfile.uid);
+  const canExecuteDraw = isEkubAdmin;
 
+  const [allMembers, setAllMembers] = useState<EkubMember[]>([]);
   const [members, setMembers] = useState<EkubMember[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(true);
   const [stage, setStage] = useState<'idle' | 'countdown' | 'spinning' | 'revealed'>('idle');
@@ -70,11 +79,13 @@ export const LiveDrawModal: React.FC<LiveDrawModalProps> = ({
       try {
         const all = await getEkubMembers(ekub.id);
         const safeAll = Array.isArray(all) ? all : [];
+        setAllMembers(safeAll);
         // Eligible members: have paid and haven't received payout yet
         const eligible = safeAll.filter(m => !m.hasReceivedPayout && (m.eligibleForDraw || m.contributionStatus === 'paid'));
         setMembers(eligible.length > 0 ? eligible : safeAll.filter(m => !m.hasReceivedPayout));
       } catch (err) {
         console.error(`Failed to load members for ${ekub.id}:`, err);
+        setAllMembers([]);
         setMembers([]);
       } finally {
         setLoadingMembers(false);
@@ -82,6 +93,10 @@ export const LiveDrawModal: React.FC<LiveDrawModalProps> = ({
     };
     fetchEligible();
   }, [ekub.id]);
+
+  const isMemberOfThisEkub = isEkubAdmin || Boolean(
+    userProfile?.uid && allMembers.some(m => m.userId === userProfile.uid && m.status === 'active')
+  );
 
   const handleStartDraw = async () => {
     if (members.length === 0) {
@@ -183,7 +198,13 @@ export const LiveDrawModal: React.FC<LiveDrawModalProps> = ({
         {/* Header */}
         <div className="inline-flex items-center space-x-2 px-3 py-1 bg-[#7856FF]/20 border border-[#7856FF]/40 text-[#C4B5FD] text-[10px] font-bold uppercase tracking-[0.2em] mb-4 rounded-full">
           <Sparkles className="w-3.5 h-3.5 text-[#7856FF]" />
-          <span>{t.liveDrawTitle}</span>
+          <span>
+            {isSuperAdmin
+              ? 'GOVERNANCE NOTICE • LIVE DRAW RESTRICTED'
+              : isEkubAdmin
+              ? 'EKUB ADMIN • DRAW CONTROLLER'
+              : 'MEMBER SPECTATOR • LIVE DRAW ARENA'}
+          </span>
         </div>
 
         <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
@@ -193,6 +214,64 @@ export const LiveDrawModal: React.FC<LiveDrawModalProps> = ({
           Cycle #{ekub.currentCycle} Draw • Payout: <strong className="text-[#C4B5FD] font-mono">{ekub.payoutAmount.toLocaleString()} ETB</strong>
         </p>
 
+        {/* Role Explanatory Banner */}
+        {isSuperAdmin ? (
+          <div className="mt-4 p-4 bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs rounded-xl text-left space-y-1">
+            <div className="flex items-center space-x-2 font-bold uppercase tracking-wider text-amber-300">
+              <ShieldCheck className="w-4 h-4" />
+              <span>Super Admin Oversight</span>
+            </div>
+            <p className="text-[11px] text-white/80 leading-relaxed">
+              Platform Super Admins oversee Ekub circle configurations, assigned administrators, and member rosters. Super Admins do not participate in or execute live draws.
+            </p>
+          </div>
+        ) : isEkubAdmin ? (
+          <div className="mt-4 p-3.5 bg-[#7856FF]/15 border border-[#7856FF]/30 text-white/90 text-xs rounded-xl text-left flex items-start space-x-2.5">
+            <ShieldCheck className="w-4 h-4 text-[#C4B5FD] shrink-0 mt-0.5" />
+            <p className="text-[11px] leading-relaxed">
+              <strong>Admin Authority:</strong> You are the designated Ekub Admin for this circle. You hold sole authority to launch and execute this cycle's provably fair draw.
+            </p>
+          </div>
+        ) : isMemberOfThisEkub ? (
+          <div className="mt-4 p-3.5 bg-white/5 border border-white/10 text-white/80 text-xs rounded-xl text-left flex items-start space-x-2.5">
+            <UserCheck className="w-4 h-4 text-[#7856FF] shrink-0 mt-0.5" />
+            <p className="text-[11px] leading-relaxed">
+              <strong>Spectator Mode (Member):</strong> You are watching your circle's live draw turn. Only the assigned Ekub Admin (<strong>{ekub.adminName || 'Assigned Admin'}</strong>) can launch and manage this draw.
+            </p>
+          </div>
+        ) : (
+          <div className="mt-4 p-4 bg-red-500/15 border border-red-500/30 text-red-200 text-xs rounded-xl text-left space-y-1">
+            <div className="flex items-center space-x-2 font-bold uppercase tracking-wider text-red-300">
+              <AlertCircle className="w-4 h-4" />
+              <span>Access Restricted • Circle Members Only</span>
+            </div>
+            <p className="text-[11px] text-white/80 leading-relaxed">
+              {language === 'am'
+                ? 'በመተዳደሪያ ደንቡ መሰረት፣ አባላት የቀጥታ ዕጣ መመልከት የሚችሉት ለራሳቸው የዕቁብ ቡድን ብቻ ነው። እርስዎ የዚህ ዕቁብ አባል አይደሉም።'
+                : 'Under ROSCA privacy rules, members can only watch the live draw of their own Ekub circle. You are not enrolled as an active member in this circle.'}
+            </p>
+          </div>
+        )}
+
+        {/* NON-MEMBER RESTRICTION VIEW */}
+        {!loadingMembers && !isSuperAdmin && !isEkubAdmin && !isMemberOfThisEkub ? (
+          <div className="mt-6 py-6 space-y-4">
+            <div className="p-4 bg-white/5 border border-white/10 rounded-xl text-xs text-white/70 text-left space-y-2">
+              <p className="font-semibold text-white">How to join this Ekub?</p>
+              <p className="text-[11px] leading-relaxed">
+                Members can only join an Ekub when invited directly by the circle group admin (<strong>{ekub.adminName || 'Admin'}</strong>). Contact the group administrator to receive an invitation.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-full py-3 bg-white/10 hover:bg-white/15 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition-all border border-white/20"
+            >
+              {language === 'am' ? 'ዝጋ' : 'Close'}
+            </button>
+          </div>
+        ) : null}
+
         {error && (
           <div className="my-4 p-3 bg-red-900/50 border border-red-500/50 text-red-200 text-xs flex items-center justify-center space-x-2 rounded-lg">
             <AlertCircle className="w-4 h-4 shrink-0" />
@@ -201,7 +280,7 @@ export const LiveDrawModal: React.FC<LiveDrawModalProps> = ({
         )}
 
         {/* STAGE 1: IDLE / PREPARATION */}
-        {stage === 'idle' && (
+        {stage === 'idle' && (isSuperAdmin || isEkubAdmin || isMemberOfThisEkub) && (
           <div className="mt-6 space-y-6">
             <div className="bg-white/5 p-5 border border-white/10 rounded-xl text-left">
               <div className="flex justify-between items-center mb-3">
@@ -239,7 +318,15 @@ export const LiveDrawModal: React.FC<LiveDrawModalProps> = ({
                 {t.cancel || 'Cancel'}
               </button>
 
-              {canExecuteDraw ? (
+              {isSuperAdmin ? (
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="flex-1 py-3.5 bg-white/10 hover:bg-white/15 text-white/80 font-bold text-xs uppercase tracking-widest border border-white/20 transition-all rounded-xl"
+                >
+                  Close & Return to Governance
+                </button>
+              ) : canExecuteDraw ? (
                 <button
                   type="button"
                   onClick={handleStartDraw}
@@ -250,12 +337,12 @@ export const LiveDrawModal: React.FC<LiveDrawModalProps> = ({
                   <span>{language === 'am' ? 'ዕጣውን አሁን ጀምር' : 'Launch Live Draw'}</span>
                 </button>
               ) : (
-                <div className="flex-1 py-3.5 bg-white/5 border border-white/10 text-white/60 font-bold text-[11px] uppercase tracking-widest flex items-center justify-center space-x-2 rounded-xl">
-                  <ShieldCheck className="w-4 h-4 text-[#7856FF]" />
+                <div className="flex-1 py-3.5 bg-white/5 border border-white/10 text-[#C4B5FD] font-bold text-[11px] uppercase tracking-wider flex items-center justify-center space-x-2 rounded-xl">
+                  <span className="w-2 h-2 rounded-full bg-[#7856FF] animate-ping" />
                   <span>
                     {language === 'am'
-                      ? 'የዕቁብ አስተዳዳሪ ዕጣውን እስኪጀምር ይጠብቁ'
-                      : 'Waiting for the Ekub Admin to start this draw'}
+                      ? 'የዕቁብ አስተዳዳሪ ዕጣውን እስኪጀምር ይጠብቁ...'
+                      : `Awaiting Ekub Admin (${ekub.adminName || 'Admin'}) to Launch Draw...`}
                   </span>
                 </div>
               )}

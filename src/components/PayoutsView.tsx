@@ -11,18 +11,21 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../firebase/AuthContext';
 import { useTranslation } from '../locales/TranslationContext';
-import { Payout } from '../types';
+import { Payout, UserProfile } from '../types';
 
 interface PayoutsViewProps {
   payouts: Payout[];
   onOpenClaim: (payout: Payout) => void;
+  userProfile?: UserProfile | null;
 }
 
 export const PayoutsView: React.FC<PayoutsViewProps> = ({
   payouts,
   onOpenClaim,
+  userProfile: propUserProfile,
 }) => {
-  const { userProfile } = useAuth();
+  const auth = useAuth();
+  const userProfile = propUserProfile !== undefined ? propUserProfile : auth.userProfile;
   const { t, language } = useTranslation();
 
   return (

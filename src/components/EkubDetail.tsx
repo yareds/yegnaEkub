@@ -18,12 +18,15 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../firebase/AuthContext';
 import { useTranslation } from '../locales/TranslationContext';
-import { Ekub, EkubMember, Draw } from '../types';
+import { Ekub, EkubMember, Draw, UserProfile } from '../types';
 import { getEkubMembers } from '../firebase/ekubService';
 
 interface EkubDetailProps {
   ekub: Ekub;
   draws: Draw[];
+  userProfile?: UserProfile | null;
+  isAdmin?: boolean;
+  isSuperAdmin?: boolean;
   onBack: () => void;
   onOpenContribute: (ekub: Ekub) => void;
   onOpenLiveDraw: (ekub: Ekub) => void;
@@ -33,12 +36,18 @@ interface EkubDetailProps {
 export const EkubDetail: React.FC<EkubDetailProps> = ({
   ekub,
   draws,
+  userProfile: propUserProfile,
+  isAdmin: propIsAdmin,
+  isSuperAdmin: propIsSuperAdmin,
   onBack,
   onOpenContribute,
   onOpenLiveDraw,
   onOpenVerifyDraw,
 }) => {
-  const { userProfile, isAdmin } = useAuth();
+  const auth = useAuth();
+  const userProfile = propUserProfile !== undefined ? propUserProfile : auth.userProfile;
+  const isSuperAdmin = propIsSuperAdmin !== undefined ? propIsSuperAdmin : auth.isSuperAdmin;
+  const isEkubAdmin = Boolean(userProfile?.uid && ekub.adminId === userProfile.uid);
   const { t, language } = useTranslation();
 
   const [members, setMembers] = useState<EkubMember[]>([]);
@@ -63,6 +72,7 @@ export const EkubDetail: React.FC<EkubDetailProps> = ({
 
   const ekubDraws = (draws || []).filter(d => d.ekubId === ekub.id);
   const userMemberRecord = (members || []).find(m => m.userId === userProfile?.uid);
+  const isMemberOfThisEkub = isEkubAdmin || Boolean(userMemberRecord && userMemberRecord.status === 'active');
 
   const handleCopyCode = () => {
     navigator.clipboard.writeText(ekub.inviteCode || ekub.id);
@@ -83,7 +93,7 @@ export const EkubDetail: React.FC<EkubDetailProps> = ({
           <span>{language === 'am' ? 'ወደ ዋና ገጽ ተመለስ' : 'Back to Ekub List'}</span>
         </button>
 
-        {ekub.inviteCode && (
+        {isEkubAdmin && ekub.inviteCode && (
           <button
             onClick={handleCopyCode}
             className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-white border border-[#E6E1F5] rounded-xl text-gray-700 text-xs font-bold uppercase tracking-wider transition-colors hover:bg-gray-50 shadow-xs"
@@ -119,22 +129,46 @@ export const EkubDetail: React.FC<EkubDetailProps> = ({
           </div>
 
           {/* Action CTAs */}
-          <div className="flex flex-wrap gap-3">
-            <button
-              onClick={() => onOpenContribute(ekub)}
-              className="px-5 py-3 bg-[#7856FF] hover:bg-[#6340FF] text-white rounded-xl font-bold text-xs uppercase tracking-widest shadow-md active:scale-98 transition-all flex items-center space-x-2"
-            >
-              <Receipt className="w-4 h-4 text-white" />
-              <span>{t.payContribution}</span>
-            </button>
+          <div className="flex flex-wrap items-center gap-3">
+            {isSuperAdmin ? (
+              <div className="px-4 py-2.5 bg-[#7856FF]/10 border border-[#7856FF]/30 text-[#7856FF] rounded-xl font-bold text-xs uppercase tracking-wider flex items-center space-x-2">
+                <ShieldCheck className="w-4 h-4 text-[#7856FF]" />
+                <span>Super Admin Circle Oversight</span>
+              </div>
+            ) : isEkubAdmin ? (
+              <>
+                <button
+                  onClick={() => onOpenLiveDraw(ekub)}
+                  className="px-5 py-3 bg-[#7856FF] hover:bg-[#6340FF] text-white rounded-xl font-bold text-xs uppercase tracking-widest shadow-md active:scale-98 transition-all flex items-center space-x-2"
+                >
+                  <Sparkles className="w-4 h-4 text-white" />
+                  <span>Launch Live Draw</span>
+                </button>
+              </>
+            ) : isMemberOfThisEkub ? (
+              <>
+                <button
+                  onClick={() => onOpenContribute(ekub)}
+                  className="px-5 py-3 bg-[#7856FF] hover:bg-[#6340FF] text-white rounded-xl font-bold text-xs uppercase tracking-widest shadow-md active:scale-98 transition-all flex items-center space-x-2"
+                >
+                  <Receipt className="w-4 h-4 text-white" />
+                  <span>{t.payContribution}</span>
+                </button>
 
-            <button
-              onClick={() => onOpenLiveDraw(ekub)}
-              className="px-5 py-3 bg-[#1C1132] hover:bg-[#2A1B4A] text-white rounded-xl font-bold text-xs uppercase tracking-widest shadow-md active:scale-98 transition-all flex items-center space-x-2 border border-[#7856FF]/30"
-            >
-              <Sparkles className="w-4 h-4 text-[#C4B5FD]" />
-              <span>{t.joinDraw}</span>
-            </button>
+                <button
+                  onClick={() => onOpenLiveDraw(ekub)}
+                  className="px-5 py-3 bg-[#1C1132] hover:bg-[#2A1B4A] text-white rounded-xl font-bold text-xs uppercase tracking-widest shadow-md active:scale-98 transition-all flex items-center space-x-2 border border-[#7856FF]/30"
+                >
+                  <Sparkles className="w-4 h-4 text-[#C4B5FD]" />
+                  <span>Watch Live Draw</span>
+                </button>
+              </>
+            ) : (
+              <div className="px-4 py-2.5 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl text-xs font-semibold flex items-center space-x-2">
+                <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>{language === 'am' ? 'በአስተዳዳሪ ግብዣ ብቻ የሚቀላቀል' : 'Invitation-Only (Admin Managed)'}</span>
+              </div>
+            )}
           </div>
         </div>
 

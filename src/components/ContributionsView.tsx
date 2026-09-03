@@ -14,20 +14,23 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../firebase/AuthContext';
 import { useTranslation } from '../locales/TranslationContext';
-import { Contribution, Ekub } from '../types';
+import { Contribution, Ekub, UserProfile } from '../types';
 
 interface ContributionsViewProps {
   contributions: Contribution[];
   ekubs: Ekub[];
   onOpenContribute: (ekub?: Ekub) => void;
+  userProfile?: UserProfile | null;
 }
 
 export const ContributionsView: React.FC<ContributionsViewProps> = ({
   contributions,
   ekubs,
   onOpenContribute,
+  userProfile: propUserProfile,
 }) => {
-  const { userProfile } = useAuth();
+  const auth = useAuth();
+  const userProfile = propUserProfile !== undefined ? propUserProfile : auth.userProfile;
   const { t, language } = useTranslation();
 
   const [filter, setFilter] = useState<'all' | 'verified' | 'pending' | 'mine'>('all');

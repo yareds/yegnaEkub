@@ -27,7 +27,14 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
-  const getIcon = (type: string) => {
+  const getIcon = (type: string, channel?: string) => {
+    if (channel === 'sms') {
+      return (
+        <div className="w-6 h-6 rounded-md bg-purple-100 text-[#7856FF] flex items-center justify-center font-bold">
+          <span className="text-[10px]">SMS</span>
+        </div>
+      );
+    }
     switch (type) {
       case 'payment_verified':
         return <CheckCircle2 className="w-4 h-4 text-emerald-600" />;
@@ -35,6 +42,10 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
         return <Sparkles className="w-4 h-4 text-[#7856FF]" />;
       case 'payout_processed':
         return <Coins className="w-4 h-4 text-emerald-600" />;
+      case 'overdue_alert':
+        return <AlertCircle className="w-4 h-4 text-red-600" />;
+      case 'contribution_reminder':
+        return <Clock className="w-4 h-4 text-amber-600" />;
       case 'reminder':
         return <Clock className="w-4 h-4 text-amber-600" />;
       default:
@@ -106,11 +117,23 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
                 }`}
               >
                 <div className="flex items-start space-x-2.5">
-                  <div className="mt-0.5 shrink-0">{getIcon(n.type)}</div>
+                  <div className="mt-0.5 shrink-0">{getIcon(n.type, n.channel)}</div>
                   <div className="flex-1">
-                    <p className="font-bold text-[#1C1132]">{n.title}</p>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-bold text-[#1C1132]">{n.title}</p>
+                      {n.channel === 'sms' && (
+                        <span className="px-1.5 py-0.5 bg-purple-100 text-[#7856FF] border border-purple-200 rounded text-[9px] font-bold uppercase tracking-wider shrink-0">
+                          SMS Sent
+                        </span>
+                      )}
+                    </div>
                     <p className="text-gray-600 mt-0.5 leading-relaxed">{n.message}</p>
-                    <p className="text-[10px] text-gray-400 mt-1.5 font-mono">
+                    {n.recipientPhone && (
+                      <p className="text-[10px] text-purple-700 mt-1 font-medium">
+                        📱 Sent to member phone: {n.recipientPhone} (Ethio Telecom SMS)
+                      </p>
+                    )}
+                    <p className="text-[10px] text-gray-400 mt-1 font-mono">
                       {n.createdAt ? n.createdAt.replace('T', ' ').substring(0, 16) : 'Recent'}
                     </p>
                   </div>

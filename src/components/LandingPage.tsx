@@ -21,7 +21,7 @@ import { YegnaEkubLogo } from './YegnaEkubLogo';
 
 interface LandingPageProps {
   onStartEkub: () => void;
-  onJoinEkub: () => void;
+  onSignIn?: () => void;
   onExploreEkubs: () => void;
   onOpenLegal: () => void;
   /** Only a Super Admin can create an Ekub, so the "Start an Ekub" CTA is
@@ -35,7 +35,7 @@ interface LandingPageProps {
 
 export const LandingPage: React.FC<LandingPageProps> = ({
   onStartEkub,
-  onJoinEkub,
+  onSignIn,
   onExploreEkubs,
   onOpenLegal,
   isAdmin = false,
@@ -98,49 +98,66 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               </button>
             )}
 
+            {onSignIn && !isAdmin && (
+              <button
+                onClick={onSignIn}
+                className="w-full sm:w-auto px-6 py-3.5 bg-[#7856FF] hover:bg-[#6340FF] text-white font-bold text-xs uppercase tracking-widest shadow-lg shadow-[#7856FF]/25 transition-all flex items-center justify-center space-x-2 rounded-lg"
+              >
+                <Users className="w-4 h-4" />
+                <span>{language === 'am' ? 'ይግቡ (የተጋበዙ አባላት)' : 'Sign In (Invited Members)'}</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            )}
+
             <button
-              onClick={onJoinEkub}
-              className={`w-full sm:w-auto px-6 py-3.5 font-bold text-xs uppercase tracking-widest transition-all flex items-center justify-center space-x-2 rounded-lg ${
-                isAdmin
-                  ? 'bg-white/10 hover:bg-white/15 text-white border border-white/20'
-                  : 'bg-[#7856FF] hover:bg-[#6340FF] text-white shadow-lg shadow-[#7856FF]/25'
-              }`}
+              onClick={onExploreEkubs}
+              className="w-full sm:w-auto px-6 py-3.5 bg-white/10 hover:bg-white/15 text-white border border-white/20 font-bold text-xs uppercase tracking-widest transition-all flex items-center justify-center space-x-2 rounded-lg"
             >
-              <Users className="w-4 h-4" />
-              <span>{t.joinEkub}</span>
-              {!isAdmin && <ArrowRight className="w-4 h-4" />}
+              <span>{t.exploreEkubs}</span>
             </button>
           </div>
 
+          <div className="mt-4 flex items-center justify-center space-x-2 text-[11px] text-[#C4B5FD]/80">
+            <ShieldCheck className="w-3.5 h-3.5 text-[#7856FF]" />
+            <span>
+              {language === 'am'
+                ? 'የዕቁብ አባላት የሚቀላቀሉት በዕቁብ አስተዳዳሪ ቀጥተኛ ግብዣ ብቻ ነው።'
+                : 'Members participate exclusively by invitation from their Ekub Admin.'}
+            </span>
+          </div>
+
           {onStartDemo && (
-            <div className="mt-8 pt-6 border-t border-white/10 max-w-lg mx-auto">
-              <p className="text-[11px] uppercase tracking-widest text-white/50 font-bold mb-3">
-                {language === 'am' ? 'ወይም ማንኛውንም ሂሳብ ሳይፈጥሩ ይመልከቱ' : 'Or explore first, no account needed'}
+            <div className="mt-8 pt-6 border-t border-white/10 max-w-2xl mx-auto">
+              <p className="text-[11px] uppercase tracking-widest text-[#C4B5FD] font-bold mb-3">
+                {language === 'am' ? 'የቀጥታ ማሳያ (ዴሞ) -- ማንኛውንም ሂሳብ ሳይፈጥሩ ሁሉንም ተግባራት ይሞክሩ' : 'Interactive Product Demo -- Explore all features before purchase'}
               </p>
-              <div className="flex flex-wrap items-center justify-center gap-2">
+              <div className="flex flex-wrap items-center justify-center gap-2.5">
                 <button
                   onClick={() => onStartDemo('super_admin')}
-                  className="px-4 py-2 bg-white/5 hover:bg-white/15 text-white/90 text-[11px] font-bold uppercase tracking-wider border border-white/15 rounded-lg transition-colors"
+                  className="px-4 py-2.5 bg-[#7856FF] hover:bg-[#6340FF] text-white text-xs font-bold uppercase tracking-wider rounded-xl shadow-md transition-all flex items-center space-x-1.5"
                 >
-                  {language === 'am' ? 'እንደ ሱፐር አድሚን ይመልከቱ' : 'View as Super Admin'}
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>{language === 'am' ? 'እንደ ሱፐር አድሚን (የዕቁቦች ዝርዝር)' : 'Super Admin (All Ekubs)'}</span>
                 </button>
                 <button
                   onClick={() => onStartDemo('ekub_admin')}
-                  className="px-4 py-2 bg-white/5 hover:bg-white/15 text-white/90 text-[11px] font-bold uppercase tracking-wider border border-white/15 rounded-lg transition-colors"
+                  className="px-4 py-2.5 bg-white/15 hover:bg-white/25 text-white text-xs font-bold uppercase tracking-wider border border-white/20 rounded-xl transition-all flex items-center space-x-1.5"
                 >
-                  {language === 'am' ? 'እንደ ዕቁብ አድሚን ይመልከቱ' : 'View as Ekub Admin'}
+                  <Users className="w-3.5 h-3.5 text-[#C4B5FD]" />
+                  <span>{language === 'am' ? 'እንደ ዕቁብ አድሚን (የአባላት ዝርዝር)' : 'Ekub Admin (Members & SMS)'}</span>
                 </button>
                 <button
                   onClick={() => onStartDemo('member')}
-                  className="px-4 py-2 bg-white/5 hover:bg-white/15 text-white/90 text-[11px] font-bold uppercase tracking-wider border border-white/15 rounded-lg transition-colors"
+                  className="px-4 py-2.5 bg-white/15 hover:bg-white/25 text-white text-xs font-bold uppercase tracking-wider border border-white/20 rounded-xl transition-all flex items-center space-x-1.5"
                 >
-                  {language === 'am' ? 'እንደ አባል ይመልከቱ' : 'View as Member'}
+                  <Coins className="w-3.5 h-3.5 text-[#C4B5FD]" />
+                  <span>{language === 'am' ? 'እንደ አባል (መዋጮ እና ዕጣ መከታተል)' : 'Member (Contributions & Draws)'}</span>
                 </button>
               </div>
-              <p className="text-[10px] text-white/40 mt-2.5">
+              <p className="text-[10px] text-white/50 mt-3">
                 {language === 'am'
-                  ? 'የናሙና ውሂብ ብቻ ነው የሚያሳየው -- ምንም ነገር አይቀመጥም።'
-                  : 'Shows sample data only -- nothing you see or do here is ever saved.'}
+                  ? 'የናሙና ውሂብ ብቻ ነው የሚያሳየው -- በነጻነት መተግበሪያውን ያስሱ።'
+                  : 'Pre-populated with rich sample data: Ekub lists, member rosters with SMS due dates, verified receipts, and verifiable lottery draws.'}
               </p>
             </div>
           )}
@@ -293,10 +310,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 </button>
               ) : (
                 <button
-                  onClick={onJoinEkub}
+                  onClick={onExploreEkubs}
                   className="w-full mt-5 py-3 bg-[#7856FF] hover:bg-[#6340FF] text-white font-bold text-xs uppercase tracking-widest shadow-md transition-colors rounded-lg"
                 >
-                  {language === 'am' ? 'ተመሳሳይ ዕቁብ ፈልግ ወይም ተቀላቀል' : 'Find or Join a Circle Like This'}
+                  {language === 'am' ? 'የዕቁብ ዝርዝሮችን ይመልከቱ' : 'Explore Public Ekub Circles'}
                 </button>
               )}
             </div>
@@ -304,6 +321,169 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           </div>
         </div>
       </section>
+
+      {/* Interactive Demo Showcase Section */}
+      {onStartDemo && (
+        <section className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="bg-gradient-to-b from-[#2B1B48] to-[#1C1132] text-white p-8 sm:p-10 border border-[#7856FF]/30 rounded-3xl shadow-xl relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-96 h-96 bg-[#7856FF]/15 blur-[90px] rounded-full pointer-events-none" />
+            
+            <div className="text-center max-w-2xl mx-auto mb-10 relative z-10">
+              <div className="inline-flex items-center space-x-2 px-3 py-1 bg-[#7856FF]/30 border border-[#7856FF]/50 text-[#C4B5FD] text-[10px] font-bold uppercase tracking-[0.2em] mb-2 rounded-full">
+                <Sparkles className="w-3.5 h-3.5 text-[#7856FF]" />
+                <span>Interactive Live Demo</span>
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
+                {language === 'am' ? 'መተግበሪያውን ከመግዛትዎ በፊት በቀጥታ ይሞክሩ' : 'Explore All Core Features Before You Buy'}
+              </h2>
+              <p className="text-xs sm:text-sm text-white/70 mt-2 leading-relaxed">
+                {language === 'am'
+                  ? 'ናሙና ውሂብ ቀድሞ ተሞልቷል -- በሱፐር አድሚን፣ በዕቁብ አድሚን እና በአባል ሚናዎች ውስጥ ያሉትን ሁሉንም ገጾች እና ተግባራት ያስሱ።'
+                  : 'Pre-populated with rich sample data across all roles. Click any role below to experience the platform live.'}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 relative z-10">
+              
+              {/* Card 1: Super Admin */}
+              <div className="bg-white/5 border border-white/10 hover:border-[#7856FF]/60 rounded-2xl p-6 flex flex-col justify-between transition-all group hover:bg-white/[0.08]">
+                <div>
+                  <div className="w-10 h-10 rounded-xl bg-[#7856FF]/20 border border-[#7856FF]/40 text-[#C4B5FD] flex items-center justify-center mb-4">
+                    <ShieldCheck className="w-5 h-5 text-[#7856FF]" />
+                  </div>
+                  <span className="text-[10px] uppercase font-bold tracking-widest text-[#C4B5FD] bg-[#7856FF]/20 px-2 py-0.5 rounded">
+                    Platform Oversight
+                  </span>
+                  <h3 className="text-base font-bold text-white mt-2 mb-1.5">
+                    Super Admin Workspace
+                  </h3>
+                  <p className="text-xs text-white/70 leading-relaxed mb-4">
+                    Complete oversight of all platform circles and liquidity.
+                  </p>
+
+                  <div className="space-y-2 text-xs bg-black/20 p-3.5 rounded-xl border border-white/5 mb-6 text-white/80">
+                    <div className="flex items-center space-x-2">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                      <span><strong>List of All Ekubs</strong> (Bole, Merkato, Piazza)</span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                      <span><strong>195,000 ETB</strong> Total pool liquidity</span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                      <span>Create &amp; assign Ekub Admins</span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                      <span>Platform audit log trail</span>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => onStartDemo('super_admin')}
+                  className="w-full py-3 bg-[#7856FF] hover:bg-[#6340FF] text-white text-xs font-bold uppercase tracking-wider rounded-xl shadow-md transition-all flex items-center justify-center space-x-2 group-hover:shadow-lg group-hover:shadow-[#7856FF]/25"
+                >
+                  <span>Explore as Super Admin</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Card 2: Ekub Admin */}
+              <div className="bg-white/5 border border-white/10 hover:border-[#7856FF]/60 rounded-2xl p-6 flex flex-col justify-between transition-all group hover:bg-white/[0.08]">
+                <div>
+                  <div className="w-10 h-10 rounded-xl bg-[#7856FF]/20 border border-[#7856FF]/40 text-[#C4B5FD] flex items-center justify-center mb-4">
+                    <Users className="w-5 h-5 text-[#7856FF]" />
+                  </div>
+                  <span className="text-[10px] uppercase font-bold tracking-widest text-[#C4B5FD] bg-[#7856FF]/20 px-2 py-0.5 rounded">
+                    Circle Operations
+                  </span>
+                  <h3 className="text-base font-bold text-white mt-2 mb-1.5">
+                    Ekub Admin Workspace
+                  </h3>
+                  <p className="text-xs text-white/70 leading-relaxed mb-4">
+                    Manage circle members, SMS notifications, and payment auditing.
+                  </p>
+
+                  <div className="space-y-2 text-xs bg-black/20 p-3.5 rounded-xl border border-white/5 mb-6 text-white/80">
+                    <div className="flex items-center space-x-2">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                      <span><strong>List of Members</strong> (20 members in Merkato)</span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                      <span><strong>Overdue Alerts in Red</strong> &amp; draw suspension</span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                      <span><strong>3-Day SMS Reminders</strong> (Ethio Telecom)</span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                      <span>Audit Telebirr/CBE slips &amp; run draws</span>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => onStartDemo('ekub_admin')}
+                  className="w-full py-3 bg-[#7856FF] hover:bg-[#6340FF] text-white text-xs font-bold uppercase tracking-wider rounded-xl shadow-md transition-all flex items-center justify-center space-x-2 group-hover:shadow-lg group-hover:shadow-[#7856FF]/25"
+                >
+                  <span>Explore as Ekub Admin</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Card 3: Member */}
+              <div className="bg-white/5 border border-white/10 hover:border-[#7856FF]/60 rounded-2xl p-6 flex flex-col justify-between transition-all group hover:bg-white/[0.08]">
+                <div>
+                  <div className="w-10 h-10 rounded-xl bg-[#7856FF]/20 border border-[#7856FF]/40 text-[#C4B5FD] flex items-center justify-center mb-4">
+                    <Coins className="w-5 h-5 text-[#7856FF]" />
+                  </div>
+                  <span className="text-[10px] uppercase font-bold tracking-widest text-[#C4B5FD] bg-[#7856FF]/20 px-2 py-0.5 rounded">
+                    Member Experience
+                  </span>
+                  <h3 className="text-base font-bold text-white mt-2 mb-1.5">
+                    Member Workspace
+                  </h3>
+                  <p className="text-xs text-white/70 leading-relaxed mb-4">
+                    Submit contributions, watch draws, and verify HMAC-SHA256 math.
+                  </p>
+
+                  <div className="space-y-2 text-xs bg-black/20 p-3.5 rounded-xl border border-white/5 mb-6 text-white/80">
+                    <div className="flex items-center space-x-2">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                      <span><strong>Make Contributions</strong> via Telebirr/CBE</span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                      <span><strong>Watch Live Draws</strong> in rotating arena</span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                      <span><strong>Verify Cryptographic Proofs</strong> (SHA-256)</span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                      <span>Payout timeline &amp; SMS notifications</span>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => onStartDemo('member')}
+                  className="w-full py-3 bg-[#7856FF] hover:bg-[#6340FF] text-white text-xs font-bold uppercase tracking-wider rounded-xl shadow-md transition-all flex items-center justify-center space-x-2 group-hover:shadow-lg group-hover:shadow-[#7856FF]/25"
+                >
+                  <span>Explore as Member</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* How YegnaEkub Works (6 Steps) */}
       <section className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">

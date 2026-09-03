@@ -14,23 +14,29 @@ import {
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useAuth } from '../firebase/AuthContext';
 import { useTranslation } from '../locales/TranslationContext';
-import { Ekub, PreferredPaymentMethod } from '../types';
+import { Ekub, PreferredPaymentMethod, UserProfile } from '../types';
 import { ETHIOPIAN_BANK_ACCOUNTS } from '../data/demoData';
-import { submitContribution } from '../firebase/ekubService';
+import { submitContribution, isDemoModeActive } from '../firebase/ekubService';
 import { storage } from '../firebase/config';
 
 interface ContributeModalProps {
   ekub: Ekub;
+  userProfile?: UserProfile | null;
+  isDemoMode?: boolean;
   onClose: () => void;
   onSuccess: () => void;
 }
 
 export const ContributeModal: React.FC<ContributeModalProps> = ({
   ekub,
+  userProfile: propUserProfile,
+  isDemoMode: propIsDemoMode,
   onClose,
   onSuccess,
 }) => {
-  const { userProfile } = useAuth();
+  const auth = useAuth();
+  const userProfile = propUserProfile !== undefined ? propUserProfile : auth.userProfile;
+  const isDemo = propIsDemoMode ?? isDemoModeActive();
   const { t, language } = useTranslation();
 
   const [cycleCount, setCycleCount] = useState<number>(1);
@@ -82,12 +88,31 @@ export const ContributeModal: React.FC<ContributeModalProps> = ({
       e.target.value = '';
       return;
     }
-    if (!userProfile?.uid) {
-      setUploadError('You must be signed in to upload a receipt.');
+
+    setUploadingReceipt(true);
+
+    // In demo mode or if storage is unconfigured / demo user, use local FileReader for instant receipt preview
+    if (isDemo || !storage || userProfile?.uid?.startsWith('demo-')) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        setReceiptUrl(reader.result as string);
+        setReceiptFileName(file.name);
+        setUploadingReceipt(false);
+      };
+      reader.onerror = () => {
+        setUploadError('Failed to read receipt file.');
+        setUploadingReceipt(false);
+      };
+      reader.readAsDataURL(file);
       return;
     }
 
-    setUploadingReceipt(true);
+    if (!userProfile?.uid) {
+      setUploadError('You must be signed in to upload a receipt.');
+      setUploadingReceipt(false);
+      return;
+    }
+
     try {
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
       const path = `receipts/${ekub.id}/${userProfile.uid}/${Date.now()}_${safeName}`;
@@ -98,7 +123,13 @@ export const ContributeModal: React.FC<ContributeModalProps> = ({
       setReceiptFileName(file.name);
     } catch (err: any) {
       console.error('Receipt upload failed:', err);
-      setUploadError(err?.message || 'Failed to upload receipt. Please try again.');
+      // Graceful fallback to Data URL if storage throws (e.g. offline or permission issue)
+      const reader = new FileReader();
+      reader.onload = () => {
+        setReceiptUrl(reader.result as string);
+        setReceiptFileName(file.name);
+      };
+      reader.readAsDataURL(file);
     } finally {
       setUploadingReceipt(false);
     }

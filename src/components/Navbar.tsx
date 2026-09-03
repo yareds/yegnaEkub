@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../firebase/AuthContext';
 import { useTranslation } from '../locales/TranslationContext';
-import { AppNotification } from '../types';
+import { AppNotification, UserProfile } from '../types';
 import { YegnaEkubLogo } from './YegnaEkubLogo';
 
 interface NavbarProps {
@@ -32,10 +32,12 @@ interface NavbarProps {
   unreadCount?: number;
   onOpenNotifications: () => void;
   onOpenCreateEkub?: () => void;
-  onOpenJoinEkub?: () => void;
   onOpenLegal: () => void;
   hasAdminAccess?: boolean;
   isEkubAdminOfAny?: boolean;
+  isSuperAdmin?: boolean;
+  isAdmin?: boolean;
+  userProfile?: UserProfile | null;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -47,25 +49,27 @@ export const Navbar: React.FC<NavbarProps> = ({
   unreadCount: unreadCountProp,
   onOpenNotifications,
   onOpenCreateEkub,
-  onOpenJoinEkub,
   onOpenLegal,
   hasAdminAccess = false,
   isEkubAdminOfAny = false,
+  isSuperAdmin: propIsSuperAdmin,
+  isAdmin: propIsAdmin,
+  userProfile: propUserProfile,
 }) => {
   const currentTab = activeTabProp || currentTabProp || 'dashboard';
   const setCurrentTab = onNavigateProp || setCurrentTabProp || (() => {});
-  const { userProfile, signOut, isAdmin } = useAuth();
+  const auth = useAuth();
+  const userProfile = propUserProfile !== undefined ? propUserProfile : auth.userProfile;
+  const isSuperAdmin = propIsSuperAdmin !== undefined ? propIsSuperAdmin : auth.isSuperAdmin;
+  const isAdmin = propIsAdmin !== undefined ? propIsAdmin : (propIsSuperAdmin !== undefined ? propIsSuperAdmin : auth.isAdmin);
+  const signOut = auth.signOut;
 
-  // Three real roles, not two: isAdmin means Super Admin specifically.
+  // Three real roles, not two: isAdmin / isSuperAdmin means Super Admin specifically.
   // Someone can also be the assigned admin of a specific Ekub without
   // being Super Admin -- that's "Ekub Admin," a distinct role that
   // deserves its own label rather than being shown as a plain member.
-  const roleLabel = isAdmin ? 'Super Admin' : isEkubAdminOfAny ? 'Ekub Admin' : 'Verified Member';
-
-  // The Super Admin's "home" is the Admin Center, not the member-facing
-  // Dashboard -- they're never a member of any Ekub, so there's nothing
-  // personal to show them there.
-  const homeTab = isAdmin ? 'admin' : 'dashboard';
+  const roleLabel = isSuperAdmin ? 'Super Admin' : isEkubAdminOfAny ? 'Ekub Admin' : 'Verified Member';
+  const homeTab = 'dashboard';
   const { language, toggleLanguage, t } = useTranslation();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -92,31 +96,20 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Desktop Navigation Links */}
           <nav className="hidden lg:flex items-center space-x-6 text-xs font-semibold uppercase tracking-widest">
-            {/* The Super Admin's landing view is the Admin Center (below),
-                not this member-facing Dashboard -- hide the separate link
-                for them so there's no route back into member-only content. */}
-            {!isAdmin && (
-              <button
-                onClick={() => setCurrentTab('dashboard')}
-                className={`transition-all py-1 ${
-                  currentTab === 'dashboard'
-                    ? 'border-b-2 border-[#7856FF] text-[#C4B5FD] font-bold'
-                    : 'text-white/75 hover:text-white'
-                }`}
-              >
-                {t.dashboard}
-              </button>
-            )}
+            {/* Overview / Dashboard */}
+            <button
+              onClick={() => setCurrentTab('dashboard')}
+              className={`transition-all py-1 ${
+                currentTab === 'dashboard'
+                  ? 'border-b-2 border-[#7856FF] text-[#C4B5FD] font-bold'
+                  : 'text-white/75 hover:text-white'
+              }`}
+            >
+              {isSuperAdmin ? (language === 'am' ? 'አጠቃላይ እይታ' : 'Platform Overview') : t.dashboard}
+            </button>
 
-            {/* Discover / Contributions / Draws / Payouts are member-facing
-                personal views (find a circle, my ledger, watch a draw, my
-                payouts). The Super Admin is never a member of any circle,
-                so none of these apply to them -- their equivalent views
-                live inside the Admin Center's platform-wide tabs instead.
-                Discover specifically ("browse public circles to join") is
-                also hidden for an Ekub Admin -- their job is running their
-                own circle, not browsing others. */}
-            {!isAdmin && !isEkubAdminOfAny && (
+            {/* Discover: For members who can browse and join circles */}
+            {!isSuperAdmin && !isEkubAdminOfAny && (
               <button
                 onClick={() => setCurrentTab('discover')}
                 className={`transition-all py-1 ${
@@ -129,7 +122,8 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
-            {!isAdmin && (
+            {/* Member and Circle Admin operational tabs */}
+            {!isSuperAdmin && (
               <>
                 <button
                   onClick={() => setCurrentTab('contributions')}
@@ -176,7 +170,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     : 'bg-white/10 text-[#C4B5FD] hover:bg-[#7856FF] hover:text-white'
                 }`}
               >
-                {t.admin}
+                {isSuperAdmin ? (language === 'am' ? 'የመድረክ አስተዳደር' : 'Governance Center') : t.admin}
               </button>
             )}
 
